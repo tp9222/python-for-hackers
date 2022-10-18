@@ -24,7 +24,7 @@ with open('ip.txt') as f:
         #remove /n from target line
         line=line.strip()
 
-        command=("nmap -p- -Pn -n -A -sC -sV --script vuln "+line +" -oA "+ line)
+        command=("nmap -Pn -n -A -sC -sV --script vuln "+line +" -oA "+ line)
         print(command)
         os.system(command)
         image = pyscreenshot.grab()
