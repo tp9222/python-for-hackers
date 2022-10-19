@@ -26,8 +26,8 @@ with open('ip.txt') as f:
         
         #blacklist validation
 
-        ip_checker = pydnsbl.DNSBLIpChecker()
-        RESULT=ip_checker.check(line)
+        domain_checker = pydnsbl.DNSBLDomainChecker()
+        RESULT=domain_checker.check(line)
         image = pyscreenshot.grab()
 
         #if IP blacklisted then write to file
@@ -37,7 +37,7 @@ with open('ip.txt') as f:
           print(RESULT.detected_by)
           blacklisted_list=(RESULT.detected_by)
           write_to_file = open("blacklist.txt", "a")
-          write_to_file.writelines("\nblacklisted IP: "+line)
+          write_to_file.writelines("\nblacklisted Domain: "+line)
           write_to_file.write("\nBlacklisted By:")
           write_to_file.write(json.dumps(blacklisted_list))
           write_to_file.writelines("\n------------------------")
