@@ -14,6 +14,7 @@ with open('ip.txt') as f:
         os.system("clear")
         print(Fore.RED + "Scan Running on IP Address: "+line)
         print(Fore.WHITE)
+        line=line.strip()
         ip_checker = pydnsbl.DNSBLIpChecker()
         RESULT=ip_checker.check(line)
         image = pyscreenshot.grab()
