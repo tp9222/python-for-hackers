@@ -12,7 +12,7 @@ with open('ip.txt') as f:
         image = pyscreenshot.grab()
 
         # To display the captured screenshot
-        image.show()
+        #image.show()
 
         # To save the screenshot
 
