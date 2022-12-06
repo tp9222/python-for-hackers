@@ -31,7 +31,7 @@ with open('ip.txt') as f:
 
         # To display the captured screenshot
         #image.show()
-        line="nmap"+line
+        line="nmap_"+line
         # To save the screenshot
         image.save(line, 'png')
 
