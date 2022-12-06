@@ -15,5 +15,6 @@ with open('ip.txt') as f:
         #image.show()
 
         # To save the screenshot
+        line="sec_header_"+line
         image.save(line, 'png')
         print(line.strip())
