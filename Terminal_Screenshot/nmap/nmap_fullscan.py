@@ -33,6 +33,7 @@ with open('ip.txt') as f:
         #image.show()
 
         # To save the screenshot
+        line="nmap_"+line;
         image.save(line, 'png')
 
         #release sleeplock
