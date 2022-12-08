@@ -2,7 +2,7 @@ import pyscreenshot
 import os
 import colorama
 from colorama import Fore
-from wakepy import set_keepawake, unset_keepawake
+#from wakepy import set_keepawake, unset_keepawake
 
 
 with open('ip.txt') as f:
@@ -11,7 +11,7 @@ with open('ip.txt') as f:
         if not line:
             break
         # To prevent screen from going to sleep
-        set_keepawake(keep_screen_awake=False)
+        #set_keepawake(keep_screen_awake=False)
         # To capture the screen
         os.system("clear")
 
@@ -37,6 +37,6 @@ with open('ip.txt') as f:
         image.save(line, 'png')
 
         #release sleeplock
-        unset_keepawake()
+        #unset_keepawake()
         
         print(line.strip())
