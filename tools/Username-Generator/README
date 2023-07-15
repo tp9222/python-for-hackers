@@ -1,0 +1,32 @@
+# Username Generator
+
+The Username Generator is a GUI-based Python program that generates various username formats based on a list of names provided in a file.
+
+## Features
+
+- Browse and select an input file containing names in the "name surname" format.
+- Browse and select an output file to save the generated usernames.
+- Select desired username formats using checkboxes.
+- Optionally generate usernames in email format by appending a domain.
+- Generate and save usernames in the selected formats.
+- Error handling for missing input or output files, and at least one username format selection.
+
+## Getting Started
+
+1. Clone the repository or download the source code files.
+2. Install the required dependencies by running the following command:
+  pip install tkinter
+
+## Usage
+
+1. Launch the Username Generator program.
+2. Click the "Browse" button next to the "Input File" field and select a file containing names in the "name surname" format (one name per line).
+3. Select the desired username formats by checking the corresponding checkboxes.
+4. (Optional) If you want to generate usernames in email format, select the "Generate as email" radio button and enter a domain in the "Domain" field.
+5. Click the "Browse" button next to the "Output File" field and choose a location to save the generated usernames.
+6. Click the "Generate Usernames" button to initiate the username generation process.
+7. Once the process is completed, a success message will be displayed, and the output file will contain the generated usernames.
+
+## Disclaimer
+
+The use of generated usernames should comply with applicable laws and regulations. The developer shall not be held responsible for any misuse or illegal activities.
