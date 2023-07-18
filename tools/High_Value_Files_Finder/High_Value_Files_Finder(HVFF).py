@@ -6,7 +6,7 @@ high_value_extensions = [
     ".html", ".htaccess", ".properties", ".env", ".yml", ".yaml", ".py", ".php",
     ".asp", ".aspx", ".jsp", ".war", ".jar", ".gz", ".tar.gz", ".zip", ".rar",
     ".dbf", ".ini", ".rc", ".log", ".xml", ".pem", ".bak", ".backup", ".sql",
-    ".conf", ".config", ".old"
+    ".conf", ".config", ".pbx", ".p12", ".old"
 ]
 
 def search_files(path, output_file):
