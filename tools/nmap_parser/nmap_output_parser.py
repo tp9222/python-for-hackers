@@ -12,10 +12,15 @@ def process_nmap_output(file_path, output_file):
             ip_address = address_element.get('addr')
             output_file.write(ip_address)
 
+            hostnames = host_element.findall('.//hostnames/hostname')
+            if hostnames:
+                domain = hostnames[0].get('name')
+                output_file.write(f"\n{domain}\n")
+            else:
+                output_file.write("\n")
+
             port_elements = host_element.findall('.//port')
             if port_elements:
-                output_file.write('\n')  # Print newline only if there are ports to display
-
                 for port_element in port_elements:
                     portid = port_element.get('portid')
                     protocol = port_element.get('protocol')
