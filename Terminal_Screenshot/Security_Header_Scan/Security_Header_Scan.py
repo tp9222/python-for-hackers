@@ -1,20 +1,34 @@
 import pyscreenshot
 import os
+import subprocess
+import time
+
+def run_command(command):
+    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    out, err = process.communicate()
+    return out, err
 
 with open('ip.txt') as f:
     while True:
-        line = f.readline()
+        line = f.readline().strip()
         if not line:
             break
-        # To capture the screen
+
         os.system("clear")
-        os.system("shcheck.py -d"+" "+"https://"+line )
+        command = "shcheck.py -d https://" + line
+
+        # Run the command and capture its output
+        command_output, _ = run_command(command)
+        print(command_output.decode())  # Print the output of the command
+
+        # Wait a bit to allow the command to complete fully
+        time.sleep(2)  # Adjust the time delay as needed
+
         image = pyscreenshot.grab()
 
-        # To display the captured screenshot
-        #image.show()
-
-        # To save the screenshot
-        line="sec_header_"+line
-        image.save(line, 'png')
-        print(line.strip())
+        # Modify the filename
+        filename = "sec_header_" + line + ".png"
+        
+        # Save the screenshot
+        image.save(filename)
+        print(filename)
