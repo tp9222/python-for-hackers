@@ -11,26 +11,28 @@ def process_nmap_output(file_path, output_file):
         if address_element is not None:
             ip_address = address_element.get('addr')
             output_file.write(ip_address)
+        else:
+            output_file.write("IP Address not found\n")
 
-            hostnames = host_element.findall('.//hostnames/hostname')
-            if hostnames:
-                domain = hostnames[0].get('name')
-                output_file.write(f"\n{domain}\n")
-            else:
-                output_file.write("\n")
+        hostnames = host_element.findall('.//hostnames/hostname')
+        if hostnames:
+            domain = hostnames[0].get('name')
+            output_file.write(f"\n{domain}\n")
+        else:
+            output_file.write("\n")
 
-            port_elements = host_element.findall('.//port')
-            if port_elements:
-                for port_element in port_elements:
-                    portid = port_element.get('portid')
-                    protocol = port_element.get('protocol')
-                    service_element = port_element.find('.//service[@name]')
-                    service_name = service_element.get('name')
-                    state_element = port_element.find('.//state[@state]')
-                    state = state_element.get('state')
-                    output_file.write(f"\n   {protocol} / {portid} / {service_name} / {state}")
+        port_elements = host_element.findall('.//ports/port')
+        if port_elements:
+            for port_element in port_elements:
+                portid = port_element.get('portid')
+                protocol = port_element.get('protocol')
+                service_element = port_element.find('.//service[@name]')
+                service_name = service_element.get('name') if service_element is not None else "N/A"
+                state_element = port_element.find('.//state[@state]')
+                state = state_element.get('state') if state_element is not None else "N/A"
+                output_file.write(f"\n   {protocol} / {portid} / {service_name} / {state}")
 
-            output_file.write('\n\n')  # Two blank lines between IP outputs
+        output_file.write('\n\n')  # Two blank lines between IP outputs
 
 if __name__ == "__main__":
     current_directory = os.getcwd()
