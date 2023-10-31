@@ -1,7 +1,7 @@
 import os
 import xml.etree.ElementTree as ET
 
-def process_nmap_output(file_path, output_file, port_list_file):
+def process_nmap_output(file_path, output_file, port_list_file, nmap_command_file):
     tree = ET.parse(file_path)
     root = tree.getroot()
 
@@ -39,8 +39,12 @@ def process_nmap_output(file_path, output_file, port_list_file):
                 state = state_element.get('state') if state_element is not None else "N/A"
                 output_file.write(f"\n   {protocol} / {portid} / {service_name} / {state}")
 
-            # Write the list of TCP and UDP ports to port_list.txt
+            # Write the list of TCP and UDP ports to port_list_file
             port_list_file.write(f"{ip_address} TCP: {','.join(tcp_ports)} UDP: {','.join(udp_ports)}\n")
+
+            # Add the nmap command to nmap_command_file
+            nmap_command = f"nmap -oA {ip_address}_srv -sV -A -sC --script vuln -p {','.join(tcp_ports)} {ip_address}"
+            nmap_command_file.write(f"{nmap_command}\n")
 
         output_file.write('\n\n')  # Two blank lines between IP outputs
 
@@ -48,11 +52,12 @@ if __name__ == "__main__":
     current_directory = os.getcwd()
     output_file_path = os.path.join(current_directory, "nmap_output.txt")
     port_list_file_path = os.path.join(current_directory, "port_list.txt")
+    nmap_command_file_path = os.path.join(current_directory, "nmap_commands.txt")
 
-    with open(output_file_path, "w") as output_file, open(port_list_file_path, "w") as port_list_file:
+    with open(output_file_path, "w") as output_file, open(port_list_file_path, "w") as port_list_file, open(nmap_command_file_path, "w") as nmap_command_file:
         for file_name in os.listdir(current_directory):
             if file_name.endswith(".xml"):
                 file_path = os.path.join(current_directory, file_name)
-                process_nmap_output(file_path, output_file, port_list_file)
+                process_nmap_output(file_path, output_file, port_list_file, nmap_command_file)
 
-    print("Output written to nmap_output.txt and port_list.txt")
+    print("Output written to nmap_output.txt, port_list.txt, and nmap_commands.txt")
