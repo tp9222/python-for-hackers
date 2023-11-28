@@ -8,3 +8,4 @@ foreach ($dangerous_functions as $function) {
 		echo $function . " is enabled\n";
 	}
 }
+?>
