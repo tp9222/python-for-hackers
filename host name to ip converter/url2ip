@@ -1,0 +1,39 @@
+import csv
+import socket
+import sys
+
+def url_to_ip(url):
+    try:
+        ip_address = socket.gethostbyname(url)
+        return ip_address
+    except socket.gaierror:
+        return "Invalid URL"
+
+def main(input_file, output_file):
+    # Read URLs from input CSV file and convert to IP addresses
+    with open(input_file, 'r') as csvfile:
+        reader = csv.reader(csvfile)
+        data = list(reader)
+
+    # Convert URLs to IP addresses
+    ip_addresses = []
+    for row in data:
+        url = row[0]
+        ip = url_to_ip(url)
+        ip_addresses.append((url, ip))
+
+    # Write the IP addresses to output CSV file
+    with open(output_file, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['URL', 'IP Address'])
+        writer.writerows(ip_addresses)
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        print("Usage: python script_name.py <input_csv_file> <output_csv_file>")
+        sys.exit(1)
+
+    input_file = sys.argv[1]
+    output_file = sys.argv[2]
+
+    main(input_file, output_file)
