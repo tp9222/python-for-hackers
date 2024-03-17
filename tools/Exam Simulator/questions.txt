@@ -1,0 +1,17 @@
+Which of the following commands can be used for port scanning?
+A. nc -t
+B. nc -z
+C. nc -w
+D. nc -g
+Answer: B 
+
+EOQ
+
+Which of the following commands can be used for port scanning?
+A. nc -t
+B. nc -z
+C. nc -w
+D. nc -g
+Answer: B 
+
+EOX
