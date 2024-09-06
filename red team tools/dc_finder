@@ -1,0 +1,31 @@
+#pip install dnspython
+
+import dns.resolver
+
+def find_dc_ip(domain):
+    # SRV record format for Domain Controllers
+    srv_record = f"_ldap._tcp.dc._msdcs.{domain}"
+    
+    try:
+        # Query SRV record for the domain
+        answers = dns.resolver.resolve(srv_record, 'SRV')
+        
+        for rdata in answers:
+            # Extract the target DC hostname
+            dc_host = str(rdata.target).rstrip('.')
+            
+            # Resolve the hostname to get the IP address
+            dc_ip_answers = dns.resolver.resolve(dc_host, 'A')
+            for ip_data in dc_ip_answers:
+                print(f"Domain Controller {dc_host} has IP: {ip_data}")
+    
+    except dns.resolver.NoAnswer:
+        print(f"No SRV records found for domain: {domain}")
+    except dns.resolver.NXDOMAIN:
+        print(f"Domain {domain} does not exist.")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
+if __name__ == "__main__":
+    domain = input("Enter the domain (e.g., example.com): ")
+    find_dc_ip(domain)
