@@ -4,13 +4,18 @@ import platform
 
 def ping_ip(ip):
     # Determine the command based on the OS
-    param = "-n" if platform.system().lower() == "windows" else "-c"
+    if platform.system().lower() == "windows":
+        command = ["ping", "-n", "1", "-w", "1000", str(ip)]  # Windows
+    else:
+        command = ["ping", "-c", "1", "-W", "1", str(ip)]  # Linux/Mac
     
-    # Ping the IP address
-    command = ["ping", param, "1", "-W", "1", str(ip)]
-    response = subprocess.run(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    
-    return response.returncode == 0
+    # Ping the IP address and capture the output
+    try:
+        response = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return response.returncode == 0
+    except Exception as e:
+        print(f"Error pinging {ip}: {e}")
+        return False
 
 def check_active_ips(ip_range):
     # Parse the IP range
