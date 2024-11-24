@@ -1,3 +1,4 @@
+#need some fixes only blocking 1 SSID for now
 import subprocess
 import os
 import signal
