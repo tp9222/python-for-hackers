@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clickjacking PoC</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+        }
+
+        h1 {
+            color: #ff4b2b;
+        }
+
+        .frame-container {
+            position: relative;
+            width: 400px;
+            height: 300px;
+            margin: 50px auto;
+            border: 5px solid red; /* Visible PoC */
+            overflow: hidden;
+            box-shadow: 0 0 15px rgba(0,0,0,0.3);
+        }
+
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Clickjacking Proof of Concept</h1>
+    <p>If the target page loads below, it is vulnerable.</p>
+    
+    <div class="frame-container">
+        <iframe src="https://cvewalkthrough.com/"></iframe>
+    </div>
+
+    <p><strong>Note:</strong> If you can see and interact with the website inside the iframe, clickjacking is possible.</p>
+</body>
+</html>
