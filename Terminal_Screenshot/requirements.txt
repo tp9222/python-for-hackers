@@ -24,3 +24,4 @@ shcheck>=0.2.0
 
 # small convenience
 python-dateutil>=2.8.2
+wakepy
