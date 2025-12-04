@@ -1,4 +1,26 @@
-pyscreenshot
-wakepy
-selenium
-pydnsbl
+# screenshot capture + image processing
+mss>=9.0.0
+Pillow>=9.5.0
+opencv-python>=4.8.0
+
+# GUI automation / locating elements on screen
+PyAutoGUI>=0.9.54
+
+# image I/O / animated gifs if needed
+imageio>=2.27.0
+
+# OCR
+pytesseract>=0.3.10
+
+# clipboard & keyboard helpers
+pyperclip>=1.8.2
+keyboard>=0.13.5
+
+# filesystem & watching
+watchdog>=3.0.0
+
+# security header checker
+shcheck>=0.2.0
+
+# small convenience
+python-dateutil>=2.8.2
