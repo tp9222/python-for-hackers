@@ -1,0 +1,5 @@
+requests
+colorama
+jinja2
+pdfkit
+python-nmap
