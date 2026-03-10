@@ -194,9 +194,9 @@ def scan_target(target, scan_mode):
     os.makedirs(screenshot_dir, exist_ok=True)
 
     if scan_mode == "fast":
-        nmap_cmd = f"nmap -sC -sV --top-ports 1000 -T4 -Pn {target}"
+        nmap_cmd = f"nmap -Pn -sC -sV --top-ports 1000 -T4 -Pn {target}"
     else:
-        nmap_cmd = f"nmap -sC -sV -p- -T4 -Pn {target}"
+        nmap_cmd = f"nmap -Pn -sC -sV -p- -T4 -Pn {target}"
 
     nmap_output = os.path.join(target_dir, "nmap.txt")
     run_command(nmap_cmd, nmap_output)
