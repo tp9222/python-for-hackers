@@ -1,0 +1,38 @@
+
+# Directory listing / open indexes
+intitle:"index of" "parent directory"
+intitle:"index of" ".env"
+intitle:"index of" "backup"
+
+# Exposed configuration files
+filetype:env "DB_PASSWORD"
+filetype:yml "password:"
+filetype:xml "connectionString"
+filetype:conf "server_name"
+
+# Login pages
+inurl:admin intitle:login
+inurl:/wp-login.php
+inurl:"/admin/login" intitle:"admin"
+
+# Exposed documents
+filetype:pdf "confidential" site:example.com
+filetype:xls "username" "password"
+filetype:sql "INSERT INTO" "password"
+
+# Server / version disclosure
+intitle:"Apache Status" "Server Version"
+inurl:"/server-info" "Apache Server Information"
+inurl:phpinfo.php "PHP Version"
+
+# Error messages revealing info
+"Warning: mysql_" "on line" filetype:php
+"Fatal error:" "on line" filetype:php
+
+# Exposed cameras / IoT
+inurl:"/view.shtml" "Network Camera"
+intitle:"webcamXP 5" inurl:8080
+
+# Cloud misconfigurations
+site:s3.amazonaws.com filetype:txt
+site:blob.core.windows.net filetype:csv
