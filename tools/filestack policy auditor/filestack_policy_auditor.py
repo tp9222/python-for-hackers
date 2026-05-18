@@ -13,9 +13,9 @@ Usage:
   python filestack_audit.py --suffix "key=ABC123&policy=eyJ...&signature=abc..."
 
   # From individual components
-  python filestack_audit.py --key AVBN26PPXR000000000 \
-                            --policy eyJleHBp... \
-                            --signature 26f6727e4...
+  python filestack_audit.py --key <YOUR_FILESTACK_API_KEY> \
+                            --policy eyJleHBpcnkiOjE3Nz... \
+                            --signature <HMAC_SIGNATURE>
 
   # From a raw session API response JSON file
   python filestack_audit.py --session-file filestack_session.json
@@ -26,7 +26,7 @@ Usage:
   # Custom upload test files
   python filestack_audit.py --suffix "..." --test-files html,svg,php,js,txt
 
-Author : Internal Security Team
+Author : Tejas Pingulkar
 Purpose: Penetration testing — Filestack misconfiguration detection
 """
 
@@ -361,21 +361,214 @@ def print_upload_result(file_type: str, result: dict):
            f"{result.get('filename','')}  →  REJECTED  {DIM}{result.get('body_preview','')[:80]}{RST}")
 
 
+# ─── Policy control tests ─────────────────────────────────────────────────────
+def _raw_post(url: str, body: bytes, content_type: str, timeout: int = 15) -> dict:
+    """Make a raw POST and return {status, body, json_data}."""
+    try:
+        req = urllib.request.Request(url, data=body,
+                                     headers={"Content-Type": content_type},
+                                     method="POST")
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read().decode("utf-8", errors="replace")
+            try:    jdata = json.loads(raw)
+            except: jdata = {}
+            return {"status": r.status, "body": raw[:400], "json": jdata}
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace")[:400]
+        try:    jdata = json.loads(raw)
+        except: jdata = {}
+        return {"status": e.code, "body": raw, "json": jdata}
+    except Exception as ex:
+        return {"status": 0, "body": str(ex), "json": {}}
+
+
+def _raw_get(url: str, timeout: int = 15) -> dict:
+    """Make a raw GET and return {status, body, headers}."""
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read().decode("utf-8", errors="replace")
+            return {"status": r.status, "body": raw[:400],
+                    "headers": dict(r.headers)}
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", errors="replace")[:400]
+        return {"status": e.code, "body": raw, "headers": {}}
+    except Exception as ex:
+        return {"status": 0, "body": str(ex), "headers": {}}
+
+
+def run_policy_control_tests(api_key: str, policy_b64: str,
+                             signature: str, policy: dict) -> dict:
+    """
+    Tests whether policy-level controls are actively enforced by the
+    Filestack API — beyond what the decoded JSON claims.
+
+    Tests:
+      max_size  — upload oversized file, check if rejected
+      path      — upload with custom ?path= parameter, check if restricted
+      container — upload with custom ?container= parameter, check if restricted
+      handle    — read a non-existent handle, check error exposure
+    """
+    base_auth = urllib.parse.urlencode({
+        "key": api_key, "policy": policy_b64, "signature": signature
+    })
+    results = {}
+
+    head("POLICY CONTROL TESTS")
+    print(f"  {DIM}Testing whether policy controls are actively enforced by the API.{RST}\n")
+
+    # ── max_size test ─────────────────────────────────────────────────────────
+    info("max_size  — uploading 6 MB file to check size enforcement ...")
+    max_size_policy = policy.get("max_size")
+    # 6 MB of null bytes — should exceed most sane limits if max_size is set
+    OVERSIZE = 6 * 1024 * 1024
+    params   = base_auth + "&filename=pt_size_test.txt&mimetype=text%2Fplain"
+    r        = _raw_post(f"{FILESTACK_STORE_URL}?{params}",
+                         b"\x00" * OVERSIZE, "text/plain")
+    if r["status"] == 200:
+        if max_size_policy and OVERSIZE > max_size_policy:
+            fail(f"max_size  [{r['status']}]  Policy sets max_size={max_size_policy} "
+                 f"but {OVERSIZE} bytes ACCEPTED — not enforced")
+            results["max_size"] = {"vulnerable": True, "status": r["status"],
+                                   "detail": f"6 MB accepted despite max_size={max_size_policy}"}
+        else:
+            warn(f"max_size  [{r['status']}]  6 MB accepted — "
+                 f"no max_size in policy (expected)")
+            results["max_size"] = {"vulnerable": False, "status": r["status"],
+                                   "detail": "No max_size policy set — upload accepted (as expected)"}
+    else:
+        ok(f"max_size  [{r['status']}]  6 MB rejected — "
+           f"{r['json'].get('error', {}).get('message', r['body'][:60])}")
+        results["max_size"] = {"vulnerable": False, "status": r["status"],
+                               "detail": f"Rejected with {r['status']}"}
+
+    # ── path test ─────────────────────────────────────────────────────────────
+    info("path      — uploading with custom ?path=/pentest/ to check path scoping ...")
+    path_policy  = policy.get("path")
+    custom_path  = "/pentest/audit/"
+    params       = (base_auth +
+                    "&filename=pt_path_test.txt&mimetype=text%2Fplain"
+                    f"&path={urllib.parse.quote(custom_path)}")
+    r = _raw_post(f"{FILESTACK_STORE_URL}?{params}",
+                  b"PT-AUDIT-PATH-TEST", "text/plain")
+    if r["status"] == 200:
+        stored_path = r["json"].get("key", r["json"].get("path", ""))
+        if path_policy and not stored_path.startswith(path_policy.rstrip("*").rstrip("/")):
+            fail(f"path      [{r['status']}]  Policy restricts path to '{path_policy}' "
+                 f"but custom path '{custom_path}' ACCEPTED — stored at: {stored_path}")
+            results["path"] = {"vulnerable": True, "status": r["status"],
+                               "detail": f"Custom path accepted, stored at: {stored_path}"}
+        else:
+            warn(f"path      [{r['status']}]  Custom path accepted — "
+                 f"stored at: {stored_path or 'unknown'}  "
+                 f"{'(no path restriction in policy)' if not path_policy else ''}")
+            results["path"] = {"vulnerable": not bool(path_policy), "status": r["status"],
+                               "detail": f"Custom path accepted, stored at: {stored_path}"}
+    else:
+        ok(f"path      [{r['status']}]  Custom path rejected — "
+           f"{r['json'].get('error', {}).get('message', r['body'][:60])}")
+        results["path"] = {"vulnerable": False, "status": r["status"],
+                           "detail": f"Rejected with {r['status']}"}
+
+    # ── container test ────────────────────────────────────────────────────────
+    info("container — uploading with custom ?container= to check bucket scoping ...")
+    container_policy = policy.get("container")
+    custom_container  = "pentest-audit-bucket"
+    params = (base_auth +
+              "&filename=pt_container_test.txt&mimetype=text%2Fplain"
+              f"&container={urllib.parse.quote(custom_container)}")
+    r = _raw_post(f"{FILESTACK_STORE_URL}?{params}",
+                  b"PT-AUDIT-CONTAINER-TEST", "text/plain")
+    if r["status"] == 200:
+        if container_policy and container_policy != custom_container:
+            fail(f"container [{r['status']}]  Policy restricts container to "
+                 f"'{container_policy}' but '{custom_container}' ACCEPTED — not enforced")
+            results["container"] = {"vulnerable": True, "status": r["status"],
+                                    "detail": f"Custom container accepted despite policy={container_policy}"}
+        else:
+            warn(f"container [{r['status']}]  Custom container accepted — "
+                 f"{'no container restriction in policy' if not container_policy else 'policy matches'}")
+            results["container"] = {"vulnerable": not bool(container_policy),
+                                    "status": r["status"],
+                                    "detail": "Custom container accepted"}
+    else:
+        ok(f"container [{r['status']}]  Custom container rejected — "
+           f"{r['json'].get('error', {}).get('message', r['body'][:60])}")
+        results["container"] = {"vulnerable": False, "status": r["status"],
+                                "detail": f"Rejected with {r['status']}"}
+
+    # ── handle enumeration test ───────────────────────────────────────────────
+    info("handle    — probing a non-existent handle to check error disclosure ...")
+    FAKE_HANDLE = "aAaAaAaAaAaAaAaAaAaA"
+    cdn_url     = f"{FILESTACK_CDN}/{FAKE_HANDLE}"
+    r           = _raw_get(cdn_url)
+    # Also try with auth
+    auth_url    = (f"{FILESTACK_CDN}/{FAKE_HANDLE}"
+                   f"?policy={policy_b64}&signature={signature}")
+    r_auth      = _raw_get(auth_url)
+
+    if r["status"] == 200:
+        fail(f"handle    [{r['status']}]  Random handle returned 200 — "
+             f"possible public bucket or handle predictability issue")
+        results["handle"] = {"vulnerable": True, "status": r["status"],
+                             "detail": "Random handle returned 200"}
+    elif r["status"] == 404:
+        ok(f"handle    [{r['status']}]  Non-existent handle correctly returns 404")
+        results["handle"] = {"vulnerable": False, "status": r["status"],
+                             "detail": "404 — correct behaviour"}
+    elif r["status"] == 403:
+        ok(f"handle    [{r['status']}]  Non-existent/unauthorised handle returns 403")
+        # Check if error message leaks internal info
+        leaks = any(kw in r["body"].lower() for kw in
+                    ["s3", "bucket", "aws", "region", "internal", "stack", "exception"])
+        if leaks:
+            warn(f"handle    [INFO]  Error response may contain internal path info: "
+                 f"{r['body'][:100]}")
+        results["handle"] = {"vulnerable": False, "status": r["status"],
+                             "detail": f"403 — {'possible info leak in error' if leaks else 'clean'}"}
+    else:
+        warn(f"handle    [{r['status']}]  Unexpected response: {r['body'][:80]}")
+        results["handle"] = {"vulnerable": False, "status": r["status"],
+                             "detail": f"Status {r['status']}"}
+
+    return results
+
+
+def print_control_test_summary(control_results: dict):
+    """Print a summary row for each policy control test result."""
+    print()
+    head("POLICY CONTROL TEST RESULTS")
+    label_map = {
+        "max_size":  "max_size  (file size limit)",
+        "path":      "path      (S3 path scoping)",
+        "container": "container (bucket scoping)",
+        "handle":    "handle    (enumeration / error leak)",
+    }
+    for key, label in label_map.items():
+        r = control_results.get(key, {})
+        if r.get("vulnerable"):
+            fail(f"{label:40s}  BYPASS CONFIRMED  —  {r.get('detail','')}")
+        else:
+            ok(f"{label:40s}  protected / not applicable  —  {r.get('detail','')}")
+
+
 # ─── Summary report ───────────────────────────────────────────────────────────
 def print_summary(api_key: str, policy: dict, critical_gaps: list,
-                  upload_results: dict, no_upload: bool):
+                  upload_results: dict, no_upload: bool,
+                  control_results: dict = None):
     head("SUMMARY")
 
     # Severity
-    successes = [r for r in upload_results.values() if r.get("success")]
+    successes      = [r for r in upload_results.values() if r.get("success")]
+    ctrl_bypasses  = [k for k, v in (control_results or {}).items() if v.get("vulnerable")]
     if successes and critical_gaps:
-        sev = f"{R}HIGH{RST}"
+        sev  = f"{R}HIGH{RST}"
         cvss = "8.8 (AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:N)"
     elif critical_gaps:
-        sev = f"{Y}MEDIUM{RST}  (policy gap confirmed, upload test skipped)"
+        sev  = f"{Y}MEDIUM{RST}  (policy gap confirmed, upload test skipped)"
         cvss = "6.5 (estimate — confirm with upload test)"
     else:
-        sev = f"{G}LOW / INFO{RST}"
+        sev  = f"{G}LOW / INFO{RST}"
         cvss = "N/A"
 
     info(f"API Key        : {api_key}  {DIM}(public by design — not a finding alone){RST}")
@@ -387,6 +580,11 @@ def print_summary(api_key: str, policy: dict, critical_gaps: list,
         fail(f"CRITICAL POLICY GAPS ({len(critical_gaps)}):")
         for g in critical_gaps:
             fail(f"  allowed_file_types — ABSENT  →  {g['note']}")
+
+    if ctrl_bypasses:
+        print()
+        fail(f"POLICY CONTROL BYPASSES ({len(ctrl_bypasses)}): "
+             + ", ".join(ctrl_bypasses))
 
     if no_upload:
         print()
@@ -513,7 +711,8 @@ def main():
     critical_gaps = print_policy_audit(policy, findings)
 
     # ── Upload tests ─────────────────────────────────────────────────────────
-    upload_results = {}
+    upload_results  = {}
+    control_results = {}
 
     if not args.no_upload:
         head("UPLOAD BYPASS TEST")
@@ -534,18 +733,25 @@ def main():
             upload_results[ftype] = result
             print_upload_result(ftype, result)
 
+        # ── Policy control tests (max_size, path, container, handle) ─────────
+        control_results = run_policy_control_tests(api_key, policy_b64, signature, policy)
+        print_control_test_summary(control_results)
+
     # ── Summary ──────────────────────────────────────────────────────────────
-    print_summary(api_key, policy, critical_gaps, upload_results, args.no_upload)
+    print_summary(api_key, policy, critical_gaps, upload_results,
+                  args.no_upload, control_results)
 
     # ── JSON output ──────────────────────────────────────────────────────────
     if args.output_json:
         out = {
-            "timestamp":   datetime.now(tz=timezone.utc).isoformat(),
-            "api_key":     api_key,
-            "policy":      policy,
-            "findings":    findings,
-            "upload_tests": upload_results,
-            "vulnerable":  any(r.get("success") for r in upload_results.values()),
+            "timestamp":      datetime.now(tz=timezone.utc).isoformat(),
+            "api_key":        api_key,
+            "policy":         policy,
+            "findings":       findings,
+            "upload_tests":   upload_results,
+            "control_tests":  control_results,
+            "vulnerable":     any(r.get("success") for r in upload_results.values())
+                              or any(v.get("vulnerable") for v in control_results.values()),
         }
         with open(args.output_json, "w") as f:
             json.dump(out, f, indent=2)
