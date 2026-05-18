@@ -13,9 +13,9 @@ Usage:
   python filestack_audit.py --suffix "key=ABC123&policy=eyJ...&signature=abc..."
 
   # From individual components
-  python filestack_audit.py --key AVBN26PPXRgSy6WDFBj00z \
-                            --policy eyJleHBpcnkiOjE3Nz... \
-                            --signature 26f6727e45fd75...
+  python filestack_audit.py --key AVBN26PPXR000000000 \
+                            --policy eyJleHBp... \
+                            --signature 26f6727e4...
 
   # From a raw session API response JSON file
   python filestack_audit.py --session-file filestack_session.json
