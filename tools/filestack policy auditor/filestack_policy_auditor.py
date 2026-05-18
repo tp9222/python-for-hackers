@@ -26,7 +26,7 @@ Usage:
   # Custom upload test files
   python filestack_audit.py --suffix "..." --test-files html,svg,php,js,txt
 
-Author : Tejas Pingulkar
+Author : Internal Security Team
 Purpose: Penetration testing — Filestack misconfiguration detection
 """
 
@@ -107,11 +107,121 @@ def pre_run_instructions():
 {B}  ─────────────────────────────────────────────────────────────────────{RST}
 """)
 
-def ok(msg):   print(f"  {G}[✓]{RST} {msg}")
-def warn(msg): print(f"  {Y}[!]{RST} {msg}")
-def fail(msg): print(f"  {R}[✗]{RST} {msg}")
-def info(msg): print(f"  {C}[i]{RST} {msg}")
-def head(msg): print(f"\n{W}{msg}{RST}\n{'─'*60}")
+QUIET = False   # set True via --no-info at runtime
+
+def ok(msg):
+    if not QUIET: print(f"  {G}[✓]{RST} {msg}")
+def warn(msg):
+    if not QUIET: print(f"  {Y}[!]{RST} {msg}")
+def fail(msg):   print(f"  {R}[✗]{RST} {msg}")   # always shown — it's a finding
+def info(msg):
+    if not QUIET: print(f"  {C}[i]{RST} {msg}")
+def head(msg):
+    if not QUIET: print(f"\n{W}{msg}{RST}\n{'─'*60}")
+
+
+# ─── PoC-friendly findings report ────────────────────────────────────────────
+def print_poc_report(api_key: str, policy: dict, policy_b64: str,
+                     findings: list, upload_results: dict,
+                     control_results: dict):
+    """
+    Clean, copy-paste-ready findings block for pentest reports.
+    Always printed regardless of --no-info.
+    """
+    W60 = "═" * 68
+    w60 = "─" * 68
+    confirmed = []
+
+    # ── Policy gaps ───────────────────────────────────────────────────────────
+    for f in findings:
+        if not f["present"] and f["severity"] in ("HIGH", "MEDIUM"):
+            confirmed.append({
+                "id":       f"FS-POLICY-{f['field'].upper().replace('_','-')}",
+                "title":    f"Missing Filestack Policy Control: {f['field']}",
+                "severity": f["severity"],
+                "evidence": f["note"],
+                "poc":      None,
+                "url":      None,
+            })
+
+    # ── Upload bypass results ─────────────────────────────────────────────────
+    for ftype, r in upload_results.items():
+        if r.get("success"):
+            confirmed.append({
+                "id":       f"FS-UPLOAD-{ftype.upper()}",
+                "title":    (f"Unrestricted File Upload — {ftype.upper()} accepted "
+                             f"({r.get('filename','')})"),
+                "severity": "HIGH",
+                "evidence": (f"HTTP {r.get('status')} OK — "
+                             f"type: {r.get('response_type','')}"),
+                "poc": (
+                    f"POST /api/store/S3?key={api_key}&policy=<POLICY>&signature=<SIG>"
+                    f"&filename={r.get('filename','')}"
+                    f"&mimetype={urllib.parse.quote(r.get('mime',''))}\n"
+                    f"    Host: www.filestackapi.com\n"
+                    f"    Content-Type: {r.get('mime','')}\n"
+                    f"    Body: <malicious file content>"
+                ),
+                "url": r.get("url", ""),
+            })
+
+    # ── Control test results ──────────────────────────────────────────────────
+    ctrl_titles = {
+        "max_size":  "File Size Limit Not Enforced",
+        "path":      "Arbitrary S3 Path Accepted",
+        "container": "Arbitrary S3 Bucket Accepted",
+        "handle":    "Handle Enumeration / Error Information Disclosure",
+    }
+    for key, r in control_results.items():
+        if r.get("vulnerable"):
+            confirmed.append({
+                "id":       f"FS-CTRL-{key.upper()}",
+                "title":    ctrl_titles.get(key, key),
+                "severity": "MEDIUM",
+                "evidence": r.get("detail", ""),
+                "poc":      None,
+                "url":      None,
+            })
+
+    # ── Render ────────────────────────────────────────────────────────────────
+    print(f"\n{R}{W60}{RST}")
+    print(f"{R}  FINDINGS REPORT  —  Filestack Security Policy Audit{RST}")
+    print(f"{R}{W60}{RST}")
+
+    if not confirmed:
+        print(f"\n  {G}No confirmed findings — policy controls appear effective.{RST}\n")
+        print(f"{DIM}  {W60}{RST}\n")
+        return
+
+    expiry  = policy.get("expiry")
+    exp_str = (datetime.fromtimestamp(expiry, tz=timezone.utc)
+               .strftime("%Y-%m-%d %H:%M UTC") if expiry else "N/A")
+
+    print(f"\n  {W}Target        :{RST}  www.filestackapi.com / cdn.filestackcontent.com")
+    print(f"  {W}API Key       :{RST}  {api_key}  {DIM}(public identifier){RST}")
+    print(f"  {W}Policy calls  :{RST}  {', '.join(policy.get('calls', []))}")
+    print(f"  {W}Policy expiry :{RST}  {exp_str}")
+    print(f"  {W}Total findings:{RST}  {len(confirmed)}")
+    print(f"\n  {DIM}{w60}{RST}")
+
+    order = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
+    for i, f in enumerate(sorted(confirmed,
+                                  key=lambda x: order.get(x["severity"], 9)), 1):
+        col = R if f["severity"] == "HIGH" else Y
+        print(f"\n  {col}[{i}] {f['id']}  [{f['severity']}]{RST}")
+        print(f"       {W}Title   :{RST}  {f['title']}")
+        print(f"       {W}Evidence:{RST}  {f['evidence']}")
+        if f.get("url"):
+            print(f"       {W}CDN URL :{RST}  {f['url']}")
+        if f.get("poc"):
+            print(f"       {W}PoC     :{RST}")
+            for line in f["poc"].splitlines():
+                print(f"                {DIM}{line}{RST}")
+
+    print(f"\n  {DIM}{w60}")
+    print(f"  Policy (decoded): {json.dumps(policy)}")
+    print(f"  Re-run with --output-json <file> for machine-readable output.{RST}")
+    print(f"{R}{W60}{RST}\n")
 
 # ─── Test file payloads ───────────────────────────────────────────────────────
 TEST_FILES = {
@@ -637,6 +747,8 @@ def parse_args():
     opts = p.add_argument_group("Options")
     opts.add_argument("--no-upload",  action="store_true",
                       help="Analyse policy only — do not attempt uploads")
+    opts.add_argument("--no-info",    action="store_true",
+                      help="Suppress informational output — show findings only")
     opts.add_argument("--test-files", default="txt,html,svg,js",
                       help="Comma-separated list of file types to test. "
                            "Choices: " + ", ".join(TEST_FILES.keys()) +
@@ -651,9 +763,13 @@ def parse_args():
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
+    global QUIET
     parser, args = parse_args()
+    QUIET = getattr(args, 'no_info', False)
+
     banner()
-    pre_run_instructions()
+    if not QUIET:
+        pre_run_instructions()
 
     # ── Resolve credentials ──────────────────────────────────────────────────
     api_key = policy_b64 = signature = ""
@@ -740,6 +856,10 @@ def main():
     # ── Summary ──────────────────────────────────────────────────────────────
     print_summary(api_key, policy, critical_gaps, upload_results,
                   args.no_upload, control_results)
+
+    # ── PoC findings report (always shown) ───────────────────────────────────
+    print_poc_report(api_key, policy, policy_b64,
+                     findings, upload_results, control_results)
 
     # ── JSON output ──────────────────────────────────────────────────────────
     if args.output_json:
