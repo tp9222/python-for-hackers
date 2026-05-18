@@ -167,9 +167,9 @@ When upload testing is enabled, the tool calls `POST www.filestackapi.com/api/st
 
 CREDENTIALS
 ──────────────────────────────────────────────────────────────────────
-  [i] API Key   : AVBFBj0000  (public identifier — not a secret)
-  [i] Policy    : eyJleHBpcnkiOjE3Nzg5OD...
-  [i] Signature : 26f6727e45fd75533f...
+  [i] API Key   : <YOUR_FILESTACK_API_KEY>  (public identifier — not a secret)
+  [i] Policy    : <BASE64_POLICY>...
+  [i] Signature : <HMAC_SIGNATURE>...
 
 POLICY CONTENT
 ──────────────────────────────────────────────────────────────────────
@@ -194,7 +194,7 @@ UPLOAD BYPASS TEST
 
 SUMMARY
 ──────────────────────────────────────────────────────────────────────
-  [i] API Key        : AVBN26PPXRgSy6WDFBj00z  (public by design — not a finding alone)
+  [i] API Key        : <YOUR_FILESTACK_API_KEY>  (public by design — not a finding alone)
   [i] Severity       : HIGH
   [i] CVSS           : 8.8 (AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:N)
 
