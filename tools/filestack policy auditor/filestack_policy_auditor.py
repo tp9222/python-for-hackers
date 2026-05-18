@@ -26,7 +26,7 @@ Usage:
   # Custom upload test files
   python filestack_audit.py --suffix "..." --test-files html,svg,php,js,txt
 
-Author : Internal Security Team
+Author : Tejas Pingulkar
 Purpose: Penetration testing — Filestack misconfiguration detection
 """
 
