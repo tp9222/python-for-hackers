@@ -167,7 +167,7 @@ When upload testing is enabled, the tool calls `POST www.filestackapi.com/api/st
 
 CREDENTIALS
 ──────────────────────────────────────────────────────────────────────
-  [i] API Key   : AVBN26PPXRgSy6WDFBj00z  (public identifier — not a secret)
+  [i] API Key   : AVBN26PPXRgSy6WDFBj0000  (public identifier — not a secret)
   [i] Policy    : eyJleHBpcnkiOjE3Nzg5OD...
   [i] Signature : 26f6727e45fd75533f...
 
