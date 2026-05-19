@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 ╔══════════════════════════════════════════════════════════╗
-║  URL LIVENESS CHECKER v2.0 — Flask Web GUI               ║
-║  Custom ports + Screenshots + Live Console                ║
-║  Usage: python3 url_checker_gui.py                        ║
-║  Then open http://127.0.0.1:5001                          ║
+║       URL LIVENESS CHECKER v2.1 — Flask Web GUI          ║
+║   Custom ports + Screenshots + Live Console + UA Spoof   ║
+║       Usage: python3 mass_assets_liveness_checker.py     ║
+║            Then open http://127.0.0.1:5001               ║
 ╚══════════════════════════════════════════════════════════╝
 """
-import os, sys, time, re, json, queue, threading, uuid
+import os, sys, time, re, json, queue, threading, uuid, random
 from pathlib import Path
 from datetime import datetime
 import concurrent.futures
@@ -18,28 +18,298 @@ try:
     HAS_REQUESTS = True
 except ImportError:
     HAS_REQUESTS = False
-    import socket
 
+import socket
 from flask import Flask, request, jsonify, Response, send_file
-app = Flask(__name__)
 
+app = Flask(__name__)
 UPLOAD = Path("uploads"); UPLOAD.mkdir(exist_ok=True)
 REPORTS = Path("reports"); REPORTS.mkdir(exist_ok=True)
 JOBS = {}
 
-# ── Check functions ──────────────────────────────────────
-def check_http(host, port, scheme, timeout=5):
+UA_PROFILES = {
+    "default": {
+        "label": "URLChecker/2.1 (Minimal)",
+        "agents": [
+            "Mozilla/5.0 URLChecker/2.1"
+        ],
+        "headers": {}
+    },
+    "chrome_win": {
+        "label": "Chrome 137 — Windows 11",
+        "agents": [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+        ],
+        "headers": {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Sec-CH-UA": '"Chromium";v="137", "Not/A)Brand";v="24", "Google Chrome";v="137"',
+            "Sec-CH-UA-Mobile": "?0",
+            "Sec-CH-UA-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+            "Connection": "keep-alive",
+        }
+    },
+    "chrome_mac": {
+        "label": "Chrome 137 — macOS Sonoma",
+        "agents": [
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+        ],
+        "headers": {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Sec-CH-UA": '"Chromium";v="137", "Not/A)Brand";v="24", "Google Chrome";v="137"',
+            "Sec-CH-UA-Mobile": "?0",
+            "Sec-CH-UA-Platform": '"macOS"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+            "Connection": "keep-alive",
+        }
+    },
+    "chrome_linux": {
+        "label": "Chrome 137 — Linux (Ubuntu)",
+        "agents": [
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
+        ],
+        "headers": {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Sec-CH-UA": '"Chromium";v="137", "Not/A)Brand";v="24", "Google Chrome";v="137"',
+            "Sec-CH-UA-Mobile": "?0",
+            "Sec-CH-UA-Platform": '"Linux"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+            "Connection": "keep-alive",
+        }
+    },
+    "firefox_win": {
+        "label": "Firefox 139 — Windows 11",
+        "agents": [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:139.0) Gecko/20100101 Firefox/139.0",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0",
+        ],
+        "headers": {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1",
+            "Upgrade-Insecure-Requests": "1",
+            "Connection": "keep-alive",
+        }
+    },
+    "firefox_mac": {
+        "label": "Firefox 139 — macOS Sonoma",
+        "agents": [
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.5; rv:139.0) Gecko/20100101 Firefox/139.0",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14.4; rv:138.0) Gecko/20100101 Firefox/138.0",
+        ],
+        "headers": {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1",
+            "Upgrade-Insecure-Requests": "1",
+            "Connection": "keep-alive",
+        }
+    },
+    "firefox_linux": {
+        "label": "Firefox 139 — Linux",
+        "agents": [
+            "Mozilla/5.0 (X11; Linux x86_64; rv:139.0) Gecko/20100101 Firefox/139.0",
+            "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:138.0) Gecko/20100101 Firefox/138.0",
+        ],
+        "headers": {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1",
+            "Upgrade-Insecure-Requests": "1",
+            "Connection": "keep-alive",
+        }
+    },
+    "safari_mac": {
+        "label": "Safari 18 — macOS Sonoma",
+        "agents": [
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Safari/605.1.15",
+        ],
+        "headers": {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+        }
+    },
+    "edge_win": {
+        "label": "Edge 137 — Windows 11",
+        "agents": [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36 Edg/137.0.0.0",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36 Edg/136.0.0.0",
+        ],
+        "headers": {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Sec-CH-UA": '"Chromium";v="137", "Not/A)Brand";v="24", "Microsoft Edge";v="137"',
+            "Sec-CH-UA-Mobile": "?0",
+            "Sec-CH-UA-Platform": '"Windows"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+            "Connection": "keep-alive",
+        }
+    },
+    "android_chrome": {
+        "label": "Chrome — Android 15 (Pixel)",
+        "agents": [
+            "Mozilla/5.0 (Linux; Android 15; Pixel 9 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36",
+            "Mozilla/5.0 (Linux; Android 15; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36",
+            "Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36",
+            "Mozilla/5.0 (Linux; Android 14; SM-A546B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Mobile Safari/537.36",
+        ],
+        "headers": {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Sec-CH-UA": '"Chromium";v="137", "Not/A)Brand";v="24", "Google Chrome";v="137"',
+            "Sec-CH-UA-Mobile": "?1",
+            "Sec-CH-UA-Platform": '"Android"',
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+            "Connection": "keep-alive",
+        }
+    },
+    "android_firefox": {
+        "label": "Firefox — Android 15",
+        "agents": [
+            "Mozilla/5.0 (Android 15; Mobile; rv:139.0) Gecko/139.0 Firefox/139.0",
+            "Mozilla/5.0 (Android 14; Mobile; rv:138.0) Gecko/138.0 Firefox/138.0",
+        ],
+        "headers": {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "DNT": "1",
+            "Upgrade-Insecure-Requests": "1",
+            "Connection": "keep-alive",
+        }
+    },
+    "android_samsung": {
+        "label": "Samsung Browser — Galaxy S24",
+        "agents": [
+            "Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/26.0 Chrome/122.0.0.0 Mobile Safari/537.36",
+            "Mozilla/5.0 (Linux; Android 14; SM-S926B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/25.0 Chrome/121.0.0.0 Mobile Safari/537.36",
+        ],
+        "headers": {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Upgrade-Insecure-Requests": "1",
+            "Connection": "keep-alive",
+        }
+    },
+    "ios_safari": {
+        "label": "Safari — iOS 18 (iPhone 16)",
+        "agents": [
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Mobile/15E148 Safari/604.1",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Mobile/15E148 Safari/604.1",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1",
+        ],
+        "headers": {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+        }
+    },
+    "ios_chrome": {
+        "label": "Chrome — iOS 18 (iPhone)",
+        "agents": [
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/137.0.0.0 Mobile/15E148 Safari/604.1",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 18_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/136.0.0.0 Mobile/15E148 Safari/604.1",
+        ],
+        "headers": {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+        }
+    },
+    "ipad_safari": {
+        "label": "Safari — iPadOS 18 (iPad Pro)",
+        "agents": [
+            "Mozilla/5.0 (iPad; CPU OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Mobile/15E148 Safari/604.1",
+            "Mozilla/5.0 (iPad; CPU OS 18_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Mobile/15E148 Safari/604.1",
+        ],
+        "headers": {
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+        }
+    },
+    "random_rotate": {
+        "label": "🎲 Random Rotate (all profiles)",
+        "agents": [],
+        "headers": {}
+    },
+}
+
+def _build_random_pool():
+    pool = []
+    for k, v in UA_PROFILES.items():
+        if k in ("default", "random_rotate"):
+            continue
+        for ua in v["agents"]:
+            pool.append({"ua": ua, "headers": dict(v["headers"])})
+    return pool
+
+_RANDOM_POOL = _build_random_pool()
+
+def get_request_headers(ua_profile="default"):
+    if ua_profile == "random_rotate":
+        pick = random.choice(_RANDOM_POOL)
+        h = dict(pick["headers"])
+        h["User-Agent"] = pick["ua"]
+        return h
+    profile = UA_PROFILES.get(ua_profile, UA_PROFILES["default"])
+    h = dict(profile.get("headers", {}))
+    h["User-Agent"] = random.choice(profile["agents"])
+    return h
+
+def check_http(host, port, scheme, timeout=5, ua_profile="default"):
     url = f"{scheme}://{host}" if port in (80,443) else f"{scheme}://{host}:{port}"
     try:
-        r = requests.head(url, timeout=timeout, verify=False, allow_redirects=True,
-                         headers={"User-Agent":"Mozilla/5.0 URLChecker/2.0"})
+        hdrs = get_request_headers(ua_profile)
+        r = requests.head(url, timeout=timeout, verify=False, allow_redirects=True, headers=hdrs)
         return url, "ACTIVE", r.status_code, dict(r.headers)
     except requests.exceptions.ConnectTimeout: return url,"TIMEOUT",0,{}
     except requests.exceptions.SSLError: return url,"SSL_ERROR",0,{}
     except requests.exceptions.ConnectionError: return url,"INACTIVE",0,{}
     except Exception: return url,"ERROR",0,{}
 
-def check_socket(host, port, scheme, timeout=3):
+def check_socket(host, port, scheme, timeout=3, ua_profile="default"):
     url = f"{scheme}://{host}" if port in (80,443) else f"{scheme}://{host}:{port}"
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -75,7 +345,6 @@ def load_urls(filepath):
                     if val: urls.append(val)
         return list(dict.fromkeys(urls))
 
-# ── Screenshot tools (cross-platform) ────────────────────
 def _find_screenshot_tool():
     import shutil
     try:
@@ -121,24 +390,23 @@ def _take_screenshot(tool, url, output_path, timeout=15):
         except: return False
     elif tool["name"]=="gowitness":
         r=_sp.run(["gowitness","single",url,"--screenshot-path",str(Path(output_path).parent),
-                   "--timeout",str(timeout)], capture_output=True, timeout=timeout+10)
+                    "--timeout",str(timeout)], capture_output=True, timeout=timeout+10)
         return r.returncode==0
     elif tool["name"]=="cutycapt":
         r=_sp.run(["cutycapt",f"--url={url}",f"--out={output_path}","--insecure",
-                   f"--max-wait={timeout*1000}"], capture_output=True, timeout=timeout+10)
+                    f"--max-wait={timeout*1000}"], capture_output=True, timeout=timeout+10)
         return r.returncode==0
     elif tool["name"]=="wkhtmltoimage":
         r=_sp.run(["wkhtmltoimage","--quiet","--javascript-delay","2000","--width","1280",
-                   url,output_path], capture_output=True, timeout=timeout+10)
+                    url,output_path], capture_output=True, timeout=timeout+10)
         return r.returncode==0
     elif tool["name"] in ("chrome-headless","edge-headless"):
         r=_sp.run([tool["cmd"],"--headless","--disable-gpu","--no-sandbox",
-                   "--ignore-certificate-errors",f"--screenshot={output_path}",
-                   "--window-size=1280,900",url], capture_output=True, timeout=timeout+10)
+                    "--ignore-certificate-errors",f"--screenshot={output_path}",
+                    "--window-size=1280,900",url], capture_output=True, timeout=timeout+10)
         return r.returncode==0
     return False
 
-# ── Port list builder ────────────────────────────────────
 def build_port_list(ports_input):
     port_list = []; seen = set()
     for p in ports_input:
@@ -155,18 +423,26 @@ def build_port_list(ports_input):
                 if key not in seen: port_list.append(key); seen.add(key)
     return port_list if port_list else [(80,"http"),(443,"https"),(8080,"http"),(8080,"https")]
 
-# ── Scan job ─────────────────────────────────────────────
-def run_scan(job_id, urls, workers=30, timeout=5, custom_ports=None, take_screenshots=False):
+def run_scan(job_id, urls, workers=30, timeout=5, custom_ports=None, take_screenshots=False, ua_profile="default"):
     q = JOBS[job_id]["queue"]
     PORTS = build_port_list(custom_ports) if custom_ports else [(80,"http"),(443,"https"),(8080,"http"),(8080,"https")]
     total = len(urls)*len(PORTS)
     results = {}; active_urls = []
+
+    ua_label = UA_PROFILES.get(ua_profile, UA_PROFILES["default"])["label"]
 
     def emit(ev, d):
         q.put(json.dumps({"event":ev,"data":d}, default=str))
 
     emit("log",{"msg":f"Starting: {len(urls)} hosts × {len(PORTS)} ports = {total} checks","level":"info"})
     emit("log",{"msg":f"Ports: {', '.join(f'{s}({p})' for p,s in PORTS)} | Threads: {workers} | Screenshots: {'ON' if take_screenshots else 'OFF'}","level":"info"})
+    emit("log",{"msg":f"User-Agent: {ua_label}","level":"info"})
+
+    sample_h = get_request_headers(ua_profile)
+    emit("log",{"msg":f"  → UA: {sample_h.get('User-Agent','')}","level":"dim"})
+    if sample_h.get("Sec-CH-UA-Platform"):
+        emit("log",{"msg":f"  → Platform: {sample_h['Sec-CH-UA-Platform']} | Sec-CH-UA: {sample_h.get('Sec-CH-UA','')}","level":"dim"})
+
     emit("progress",{"done":0,"total":total,"pct":0})
     emit("ports",{"ports":[{"port":p,"scheme":s} for p,s in PORTS]})
 
@@ -175,7 +451,7 @@ def run_scan(job_id, urls, workers=30, timeout=5, custom_ports=None, take_screen
     tasks = [(h,p,s) for h in urls for p,s in PORTS]
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(check_fn,h,p,s,timeout):(h,p,s) for h,p,s in tasks}
+        futures = {pool.submit(check_fn,h,p,s,timeout,ua_profile):(h,p,s) for h,p,s in tasks}
         for future in concurrent.futures.as_completed(futures):
             h,p,s = futures[future]
             url,status,code,hdrs = future.result()
@@ -193,7 +469,6 @@ def run_scan(job_id, urls, workers=30, timeout=5, custom_ports=None, take_screen
     elapsed_check = time.time() - start
     emit("log",{"msg":f"Port check done in {elapsed_check:.1f}s — {len(active_urls)} active","level":"good"})
 
-    # ── Screenshots ──────────────────────────────────────
     screenshot_count = 0
     if take_screenshots and active_urls:
         screenshot_dir = REPORTS / f"screenshots_{job_id[:8]}"
@@ -222,7 +497,6 @@ def run_scan(job_id, urls, workers=30, timeout=5, custom_ports=None, take_screen
                 except Exception as e:
                     emit("log",{"msg":f"  Screenshot error {t['url']}: {e}","level":"warn"})
                     return idx
-            # Use fewer threads for screenshots (browser instances are heavy)
             ss_workers = min(workers, 5)
             ss_done = 0
             with concurrent.futures.ThreadPoolExecutor(max_workers=ss_workers) as ss_pool:
@@ -231,7 +505,7 @@ def run_scan(job_id, urls, workers=30, timeout=5, custom_ports=None, take_screen
                     ss_done += 1
                     if ss_done % 10 == 0 or ss_done == len(targets):
                         emit("progress",{"done":done_count,"total":total,"pct":100,
-                             "sub":f"Screenshots: {ss_done}/{len(targets)}"})
+                                         "sub":f"Screenshots: {ss_done}/{len(targets)}"})
         else:
             emit("log",{"msg":"⚠ No screenshot tool found. Install one:","level":"warn"})
             emit("log",{"msg":"  pip install playwright && playwright install chromium","level":"info"})
@@ -261,9 +535,9 @@ def run_scan(job_id, urls, workers=30, timeout=5, custom_ports=None, take_screen
     emit("log",{"msg":f"{'═'*50}","level":"info"})
 
     emit("done",{"rows":rows,"live":live_count,"down":down_count,"total":len(urls),
-                 "elapsed":round(elapsed,1),"screenshots":screenshot_count,
-                 "xlsx":JOBS[job_id].get("xlsx_path",""),
-                 "ports":[{"port":p,"scheme":s} for p,s in PORTS]})
+                  "elapsed":round(elapsed,1),"screenshots":screenshot_count,
+                  "xlsx":JOBS[job_id].get("xlsx_path",""),
+                  "ports":[{"port":p,"scheme":s} for p,s in PORTS]})
     q.put(None)
 
 def save_excel(rows, PORTS, elapsed, job_id, screenshot_count=0):
@@ -310,9 +584,17 @@ def save_excel(rows, PORTS, elapsed, job_id, screenshot_count=0):
     out = REPORTS / f"url_check_{job_id[:8]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     wb.save(str(out)); return out
 
-# ── Flask Routes ─────────────────────────────────────────
 @app.route("/")
 def index(): return HTML_PAGE
+
+@app.route("/api/ua-profiles")
+def ua_profiles():
+    return jsonify({k: v["label"] for k, v in UA_PROFILES.items()})
+
+@app.route("/api/ua-preview/<profile>")
+def ua_preview(profile):
+    h = get_request_headers(profile)
+    return jsonify(h)
 
 @app.route("/api/scan", methods=["POST"])
 def start_scan():
@@ -322,6 +604,9 @@ def start_scan():
     ports_str = request.form.get("ports","80,443,8080").strip()
     custom_ports = [int(p.strip()) for p in ports_str.split(",") if p.strip().isdigit()] or None
     take_screenshots = request.form.get("screenshots")=="1"
+    ua_profile = request.form.get("ua_profile","default")
+    if ua_profile not in UA_PROFILES:
+        ua_profile = "default"
     urls = []
     f = request.files.get("file")
     if f and f.filename:
@@ -336,7 +621,7 @@ def start_scan():
     urls = list(dict.fromkeys(urls))
     if not urls: return jsonify({"error":"No URLs provided"}),400
     JOBS[job_id] = {"queue":queue.Queue(),"status":"running"}
-    threading.Thread(target=run_scan,args=(job_id,urls,workers,timeout,custom_ports,take_screenshots),daemon=True).start()
+    threading.Thread(target=run_scan,args=(job_id,urls,workers,timeout,custom_ports,take_screenshots,ua_profile),daemon=True).start()
     return jsonify({"job_id":job_id,"count":len(urls)})
 
 @app.route("/api/stream/<job_id>")
@@ -375,19 +660,19 @@ def gallery(job_id):
     if not sd or not Path(sd).exists(): return "No screenshots",404
     files = sorted(Path(sd).glob("*.png"))
     html = f"""<!DOCTYPE html><html><head><title>Screenshots</title>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-    <style>body{{background:#0a0a0f;color:#e0e0e8;font-family:'JetBrains Mono',monospace;padding:20px}}
-    h1{{color:#00e87b;font-size:20px;margin-bottom:16px}}
-    .info{{font-size:11px;color:#6a6a7a;margin-bottom:16px}}
-    .grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px}}
-    .card{{background:#12121a;border:1px solid #2a2a3a;border-radius:10px;overflow:hidden;transition:transform .2s}}
-    .card:hover{{transform:translateY(-2px);border-color:#00c8ff}}
-    .card img{{width:100%;height:auto;display:block}}
-    .card .lbl{{padding:10px 12px;font-size:10px;color:#6a6a7a;word-break:break-all;
-      border-top:1px solid #2a2a3a;display:flex;justify-content:space-between}}
-    .card .lbl .st{{color:#00e87b;font-weight:600}}</style></head>
-    <body><h1>📸 Screenshot Gallery</h1>
-    <div class="info">{len(files)} screenshots | Job: {job_id[:8]}</div><div class="grid">"""
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>body{{background:#0a0a0f;color:#e0e0e8;font-family:'JetBrains Mono',monospace;padding:20px}}
+h1{{color:#00e87b;font-size:20px;margin-bottom:16px}}
+.info{{font-size:11px;color:#6a6a7a;margin-bottom:16px}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px}}
+.card{{background:#12121a;border:1px solid #2a2a3a;border-radius:10px;overflow:hidden;transition:transform .2s}}
+.card:hover{{transform:translateY(-2px);border-color:#00c8ff}}
+.card img{{width:100%;height:auto;display:block}}
+.card .lbl{{padding:10px 12px;font-size:10px;color:#6a6a7a;word-break:break-all;
+border-top:1px solid #2a2a3a;display:flex;justify-content:space-between}}
+.card .lbl .st{{color:#00e87b;font-weight:600}}</style></head>
+<body><h1>📸 Screenshot Gallery</h1>
+<div class="info">{len(files)} screenshots | Job: {job_id[:8]}</div><div class="grid">"""
     for f in files:
         name = f.stem.replace('_',' ')[:70]
         html += f'<div class="card"><a href="/api/screenshot/{job_id}/{f.name}" target="_blank">'
@@ -395,9 +680,8 @@ def gallery(job_id):
         html += f'<div class="lbl"><span>{name}</span><span class="st">ACTIVE</span></div></div>'
     html += '</div></body></html>'; return html
 
-# ── HTML ─────────────────────────────────────────────────
 HTML_PAGE = r"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>URL Liveness Checker v2.0</title>
+<title>URL Liveness Checker v2.1</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -454,11 +738,23 @@ tr:hover{background:rgba(0,200,255,.03)}
 .clog{height:280px;overflow-y:auto;padding:10px 14px;background:var(--bg);font-family:var(--font);font-size:10px;line-height:1.7}
 .log-good{color:var(--green)}.log-warn{color:var(--orange)}.log-error{color:var(--red)}.log-info{color:var(--dim)}.log-dim{color:#444}
 .clr{margin-left:auto;padding:3px 10px;font-size:9px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--dim);cursor:pointer;font-family:var(--font)}
+.ua-sec{background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-top:12px}
+.ua-sec h3{font-size:11px;color:var(--purple);font-family:var(--font);margin-bottom:8px}
+.ua-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.ua-row select{padding:4px 8px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:var(--font);font-size:11px;min-width:280px}
+.ua-row select:focus{outline:none;border-color:var(--purple)}
+.ua-row select option{background:var(--bg2);color:var(--text)}
+.ua-row optgroup{color:var(--purple);font-style:normal;font-weight:600}
+.ua-preview{margin-top:8px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:9px;color:var(--dim);font-family:var(--font);max-height:80px;overflow-y:auto;display:none;word-break:break-all;line-height:1.6}
+.ua-preview span{color:var(--green)}
 </style></head><body><div class="app">
-<div class="header"><h1>⬡ URL LIVENESS CHECKER</h1><div class="sub">CUSTOM PORTS · SCREENSHOTS · LIVE CONSOLE · v2.0</div></div>
+
+<div class="header"><h1>⬡ URL LIVENESS CHECKER</h1><div class="sub">CUSTOM PORTS · UA SPOOF · SCREENSHOTS · LIVE CONSOLE · v2.1</div></div>
+
 <div class="sec"><h2>📋 Input</h2>
 <div class="row"><div class="box"><label>Paste URLs (one per line)</label><textarea id="url-text" placeholder="example.com&#10;api.example.com&#10;staging.example.com"></textarea></div>
 <div class="box"><label>Or upload (.txt / .xlsx)</label><input type="file" id="url-file" accept=".txt,.csv,.xlsx,.xls"><div id="file-tag" style="margin-top:6px;font-size:10px;color:var(--dim)"></div></div></div>
+
 <div class="cfg">
 <label>Ports:</label><input type="text" id="cfg-ports" value="80,443,8080,8443">
 <span class="pre" onclick="document.getElementById('cfg-ports').value='80,443'">Web</span>
@@ -468,7 +764,48 @@ tr:hover{background:rgba(0,200,255,.03)}
 <label>Timeout:</label><input type="number" id="cfg-t" value="5" min="1" max="30">
 <div class="chk" style="margin-left:8px"><input type="checkbox" id="cfg-ss" checked><label for="cfg-ss">📸 Screenshots</label></div>
 <button class="btn" id="scan-btn" onclick="go()">▶ START SCAN</button>
-</div></div>
+</div>
+
+<div class="ua-sec">
+<h3>🛡 User-Agent / OS Spoofing</h3>
+<div class="ua-row">
+<select id="cfg-ua" onchange="previewUA()">
+<optgroup label="── Minimal ──">
+<option value="default">URLChecker/2.1 (Minimal — no OS headers)</option>
+</optgroup>
+<optgroup label="── Desktop Browsers ──">
+<option value="chrome_win" selected>Chrome 137 — Windows 11</option>
+<option value="chrome_mac">Chrome 137 — macOS Sonoma</option>
+<option value="chrome_linux">Chrome 137 — Linux (Ubuntu)</option>
+<option value="firefox_win">Firefox 139 — Windows 11</option>
+<option value="firefox_mac">Firefox 139 — macOS Sonoma</option>
+<option value="firefox_linux">Firefox 139 — Linux</option>
+<option value="safari_mac">Safari 18 — macOS Sonoma</option>
+<option value="edge_win">Edge 137 — Windows 11</option>
+</optgroup>
+<optgroup label="── Android ──">
+<option value="android_chrome">Chrome — Android 15 (Pixel/Galaxy)</option>
+<option value="android_firefox">Firefox — Android 15</option>
+<option value="android_samsung">Samsung Browser — Galaxy S24</option>
+</optgroup>
+<optgroup label="── iOS / iPadOS ──">
+<option value="ios_safari">Safari — iOS 18 (iPhone 16)</option>
+<option value="ios_chrome">Chrome — iOS 18 (iPhone)</option>
+<option value="ipad_safari">Safari — iPadOS 18 (iPad Pro)</option>
+</optgroup>
+<optgroup label="── Evasion ──">
+<option value="random_rotate">🎲 Random Rotate (all profiles per request)</option>
+</optgroup>
+</select>
+<span class="pre" onclick="document.getElementById('cfg-ua').value='default';previewUA()">Minimal</span>
+<span class="pre" onclick="document.getElementById('cfg-ua').value='chrome_win';previewUA()">Chrome/Win</span>
+<span class="pre" onclick="document.getElementById('cfg-ua').value='random_rotate';previewUA()">Random</span>
+</div>
+<div class="ua-preview" id="ua-preview"></div>
+</div>
+
+</div>
+
 <div class="stats">
 <div class="st st-total"><div class="v" id="v-total">—</div><div class="l">Total</div></div>
 <div class="st st-live"><div class="v" id="v-live">—</div><div class="l">Live</div></div>
@@ -476,59 +813,86 @@ tr:hover{background:rgba(0,200,255,.03)}
 <div class="st st-time"><div class="v" id="v-time">—</div><div class="l">Seconds</div></div>
 <div class="st st-ss"><div class="v" id="v-ss">—</div><div class="l">Screenshots</div></div>
 </div>
+
 <div class="prog" id="prog"><div class="pbar"><div class="pfill" id="pfill"></div></div><div class="ptxt"><span id="plbl">Starting…</span><span id="ppct">0%</span></div></div>
+
 <div class="res" id="res"><div class="res-h"><h2>📊 Results</h2>
 <div style="display:flex;gap:4px;margin-left:8px"><span class="fb on" onclick="filt('all',this)">All</span><span class="fb" onclick="filt('LIVE',this)">✅ Live</span><span class="fb" onclick="filt('DOWN',this)">❌ Down</span></div>
 <div style="margin-left:auto;display:flex;gap:6px"><button class="dl" id="dl-x" onclick="dlX()">⬇ Excel</button><button class="dl dl-ss" id="dl-s" onclick="dlS()">📸 Gallery</button></div>
 </div><div class="tw"><table><thead><tr id="th"></tr></thead><tbody id="tb"></tbody></table></div></div>
-<div class="con"><div class="con-h"><h2>🖥 Console</h2><span class="live" id="live">● LIVE</span><button class="clr" onclick="document.getElementById('c').innerHTML=''">✕ Clear</button></div><div class="clog" id="c"><div class="log-dim">Ready.</div></div></div>
+
+<div class="con"><div class="con-h"><h2>🖥 Console</h2><span class="live" id="live">● LIVE</span><button class="clr" onclick="document.getElementById('c').innerHTML=''">✕ Clear</button></div><div class="clog" id="c"><div class="log-dim">Ready. Select a User-Agent profile above to bypass WAF/firewall blocks.</div></div></div>
+
 </div>
+
 <script>
 let J=null,R=[],F='all',P=[];
+
 document.getElementById('url-file').onchange=function(){const f=this.files[0];document.getElementById('file-tag').textContent=f?'✓ '+f.name+' ('+(f.size/1024).toFixed(1)+'KB)':'';};
+
 function L(m,l='info'){const el=document.getElementById('c');const d=document.createElement('div');d.className='log-'+l;d.textContent='['+new Date().toLocaleTimeString()+'] '+m;el.appendChild(d);el.scrollTop=el.scrollHeight;}
+
+function previewUA(){
+    const p=document.getElementById('cfg-ua').value;
+    const box=document.getElementById('ua-preview');
+    fetch('/api/ua-preview/'+p).then(r=>r.json()).then(d=>{
+        let html='';
+        for(const[k,v]of Object.entries(d)){
+            html+='<span>'+k+':</span> '+v+'<br>';
+        }
+        box.innerHTML=html;box.style.display='block';
+    }).catch(()=>{box.style.display='none';});
+}
+
 function go(){
-  const btn=document.getElementById('scan-btn');if(btn.classList.contains('running'))return;
-  const fd=new FormData();const t=document.getElementById('url-text').value.trim();
-  if(t)fd.append('urls',t);const f=document.getElementById('url-file').files[0];
-  if(f)fd.append('file',f);if(!t&&!f){L('Provide URLs','error');return;}
-  fd.append('ports',document.getElementById('cfg-ports').value);
-  fd.append('workers',document.getElementById('cfg-w').value);
-  fd.append('timeout',document.getElementById('cfg-t').value);
-  if(document.getElementById('cfg-ss').checked)fd.append('screenshots','1');
-  btn.disabled=true;btn.classList.add('running');btn.textContent='⏹ SCANNING…';
-  document.getElementById('prog').style.display='block';document.getElementById('live').style.display='inline';
-  document.getElementById('res').style.display='block';document.getElementById('tb').innerHTML='';
-  document.getElementById('dl-x').style.display='none';document.getElementById('dl-s').style.display='none';
-  R=[];P=[];document.getElementById('c').innerHTML='';L('Uploading…');
-  fetch('/api/scan',{method:'POST',body:fd}).then(r=>r.json()).then(d=>{
-    if(d.error){L('Error: '+d.error,'error');rst();return;}
-    J=d.job_id;L('Job '+J+': '+d.count+' hosts');
-    const es=new EventSource('/api/stream/'+J);
-    es.onmessage=e=>{try{const m=JSON.parse(e.data);H(m);if(m.event==='end')es.close();}catch(x){}};
-    es.onerror=()=>{L('Connection lost','error');es.close();rst();};
-  }).catch(e=>{L('Failed: '+e,'error');rst();});
+    const btn=document.getElementById('scan-btn');if(btn.classList.contains('running'))return;
+    const fd=new FormData();const t=document.getElementById('url-text').value.trim();
+    if(t)fd.append('urls',t);const f=document.getElementById('url-file').files[0];
+    if(f)fd.append('file',f);if(!t&&!f){L('Provide URLs','error');return;}
+    fd.append('ports',document.getElementById('cfg-ports').value);
+    fd.append('workers',document.getElementById('cfg-w').value);
+    fd.append('timeout',document.getElementById('cfg-t').value);
+    fd.append('ua_profile',document.getElementById('cfg-ua').value);
+    if(document.getElementById('cfg-ss').checked)fd.append('screenshots','1');
+    btn.disabled=true;btn.classList.add('running');btn.textContent='⏹ SCANNING…';
+    document.getElementById('prog').style.display='block';document.getElementById('live').style.display='inline';
+    document.getElementById('res').style.display='block';document.getElementById('tb').innerHTML='';
+    document.getElementById('dl-x').style.display='none';document.getElementById('dl-s').style.display='none';
+    R=[];P=[];document.getElementById('c').innerHTML='';L('Uploading…');
+    fetch('/api/scan',{method:'POST',body:fd}).then(r=>r.json()).then(d=>{
+        if(d.error){L('Error: '+d.error,'error');rst();return;}
+        J=d.job_id;L('Job '+J+': '+d.count+' hosts');
+        const es=new EventSource('/api/stream/'+J);
+        es.onmessage=e=>{try{const m=JSON.parse(e.data);H(m);if(m.event==='end')es.close();}catch(x){}};
+        es.onerror=()=>{L('Connection lost','error');es.close();rst();};
+    }).catch(e=>{L('Failed: '+e,'error');rst();});
 }
+
 function rst(){const b=document.getElementById('scan-btn');b.disabled=false;b.classList.remove('running');b.textContent='▶ START SCAN';document.getElementById('live').style.display='none';}
+
 function H(m){const{event,data}=m;
-  if(event==='log')L(data.msg,data.level);
-  else if(event==='ports'){P=data.ports;document.getElementById('th').innerHTML='<th>#</th><th>Hostname</th>'+P.map(p=>'<th>'+p.scheme+'('+p.port+')</th>').join('')+'<th>Active</th><th>Status</th>';}
-  else if(event==='progress'){document.getElementById('pfill').style.width=data.pct+'%';document.getElementById('plbl').textContent=data.sub||data.done+'/'+data.total;document.getElementById('ppct').textContent=data.pct+'%';}
-  else if(event==='screenshot')L('📸 '+data.url,'good');
-  else if(event==='done'){R=data.rows||[];P=data.ports||P;document.getElementById('v-total').textContent=data.total;document.getElementById('v-live').textContent=data.live;document.getElementById('v-down').textContent=data.down;document.getElementById('v-time').textContent=data.elapsed+'s';document.getElementById('v-ss').textContent=data.screenshots||0;document.getElementById('dl-x').style.display='inline-block';if(data.screenshots>0)document.getElementById('dl-s').style.display='inline-block';rend();rst();}
+if(event==='log')L(data.msg,data.level);
+else if(event==='ports'){P=data.ports;document.getElementById('th').innerHTML='<th>#</th><th>Hostname</th>'+P.map(p=>'<th>'+p.scheme+'('+p.port+')</th>').join('')+'<th>Active</th><th>Status</th>';}
+else if(event==='progress'){document.getElementById('pfill').style.width=data.pct+'%';document.getElementById('plbl').textContent=data.sub||data.done+'/'+data.total;document.getElementById('ppct').textContent=data.pct+'%';}
+else if(event==='screenshot')L('📸 '+data.url,'good');
+else if(event==='done'){R=data.rows||[];P=data.ports||P;document.getElementById('v-total').textContent=data.total;document.getElementById('v-live').textContent=data.live;document.getElementById('v-down').textContent=data.down;document.getElementById('v-time').textContent=data.elapsed+'s';document.getElementById('v-ss').textContent=data.screenshots||0;document.getElementById('dl-x').style.display='inline-block';if(data.screenshots>0)document.getElementById('dl-s').style.display='inline-block';rend();rst();}
 }
+
 function rend(){const tb=document.getElementById('tb');const f=F==='all'?R:R.filter(r=>r.status===F);
-  tb.innerHTML=f.map((r,i)=>{const cells=P.map(p=>{const k=p.scheme+'_'+p.port;const info=r.ports[k]||{status:'ERROR',code:0};const cls={ACTIVE:'s-a',INACTIVE:'s-i',TIMEOUT:'s-t',SSL_ERROR:'s-t'}[info.status]||'s-i';const lbl=info.status==='ACTIVE'?(info.code?'ACTIVE('+info.code+')':'ACTIVE'):info.status.replace('_',' ');return '<td class="'+cls+'">'+lbl+'</td>';}).join('');return '<tr><td style="color:var(--dim)">'+(i+1)+'</td><td>'+r.host+'</td>'+cells+'<td style="color:'+(r.active_count?'var(--green)':'var(--red)')+';font-weight:700">'+r.active_count+'</td><td class="s-'+r.status.toLowerCase()+'">'+r.status+'</td></tr>';}).join('');
+tb.innerHTML=f.map((r,i)=>{const cells=P.map(p=>{const k=p.scheme+'_'+p.port;const info=r.ports[k]||{status:'ERROR',code:0};const cls={ACTIVE:'s-a',INACTIVE:'s-i',TIMEOUT:'s-t',SSL_ERROR:'s-t'}[info.status]||'s-i';const lbl=info.status==='ACTIVE'?(info.code?'ACTIVE('+info.code+')':'ACTIVE'):info.status.replace('_',' ');return '<td class="'+cls+'">'+lbl+'</td>';}).join('');return '<tr><td style="color:var(--dim)">'+(i+1)+'</td><td>'+r.host+'</td>'+cells+'<td style="color:'+(r.active_count?'var(--green)':'var(--red)')+';font-weight:700">'+r.active_count+'</td><td class="s-'+r.status.toLowerCase()+'">'+r.status+'</td></tr>';}).join('');
 }
+
 function filt(f,btn){F=f;document.querySelectorAll('.fb').forEach(b=>b.classList.remove('on'));if(btn)btn.classList.add('on');rend();}
 function dlX(){if(J)window.location.href='/api/download/'+J;}
 function dlS(){if(J)window.open('/api/screenshots/'+J,'_blank');}
+
+previewUA();
 </script></body></html>"""
 
 if __name__ == "__main__":
     print("╔══════════════════════════════════════════════════════╗")
-    print("║  URL LIVENESS CHECKER v2.0                           ║")
-    print("║  http://127.0.0.1:5001                               ║")
-    print("║  Custom ports · Screenshots · Live console            ║")
+    print("║       URL LIVENESS CHECKER v2.1                      ║")
+    print("║       http://127.0.0.1:5001                          ║")
+    print("║  Custom ports · UA Spoof · Screenshots · Console     ║")
     print("╚══════════════════════════════════════════════════════╝")
     app.run(host="0.0.0.0", port=5001, debug=False, threaded=True)
