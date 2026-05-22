@@ -1,23 +1,38 @@
 from flask import Flask, request, render_template_string, send_from_directory, send_file, jsonify
-import os, zipfile, io, datetime
+import os, zipfile, io, datetime, json, uuid
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.secret_key = "x7k2p9q"
 
-UPLOAD_FOLDER = 'uploads'
+UPLOAD_FOLDER  = 'uploads'
+COMMANDS_FILE  = 'commands.json'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 BASE_DIR = os.path.realpath(os.getcwd())
 
 
 def safe_path(relpath):
-    """Resolve relative path, ensure it stays within BASE_DIR."""
-    clean = relpath.lstrip('/').lstrip('\\') if relpath else ''
+    clean    = relpath.lstrip('/').lstrip('\\') if relpath else ''
     resolved = os.path.realpath(os.path.join(BASE_DIR, clean))
     if not resolved.startswith(BASE_DIR):
         return None
     return resolved
+
+
+def load_commands():
+    if not os.path.exists(COMMANDS_FILE):
+        return []
+    try:
+        with open(COMMANDS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def save_commands(cmds):
+    with open(COMMANDS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(cmds, f, ensure_ascii=False, indent=2)
 
 
 HTML = r"""
@@ -115,8 +130,7 @@ body::after{
 #staged-list{display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.75rem;}
 .s-item{
   background:var(--s2);border:1px solid var(--border);border-radius:3px;
-  padding:0.35rem 0.5rem;display:flex;align-items:center;gap:0.4rem;
-  font-size:0.65rem;max-width:180px;
+  padding:0.35rem 0.5rem;display:flex;align-items:center;gap:0.4rem;font-size:0.65rem;max-width:180px;
 }
 .s-thumb{width:28px;height:28px;object-fit:cover;border-radius:2px;flex-shrink:0;}
 .s-icon{
@@ -170,10 +184,7 @@ body::after{
 }
 .fs-nav-btn:hover:not(:disabled){border-color:var(--ac);color:var(--ac);}
 .fs-nav-btn:disabled{opacity:0.3;cursor:not-allowed;}
-.breadcrumb{
-  display:flex;align-items:center;gap:0;font-size:0.68rem;
-  flex:1;min-width:0;overflow:hidden;
-}
+.breadcrumb{display:flex;align-items:center;gap:0;font-size:0.68rem;flex:1;min-width:0;overflow:hidden;}
 .bc-seg{
   color:var(--muted);cursor:pointer;padding:0.2rem 0.3rem;
   border-radius:2px;transition:color 0.15s;white-space:nowrap;
@@ -199,10 +210,7 @@ body::after{
   transition:all 0.15s;text-transform:uppercase;
 }
 .fs-sort-btn.active{border-color:var(--ac2);color:var(--ac2);}
-.hidden-toggle{
-  display:flex;align-items:center;gap:0.35rem;font-size:0.62rem;
-  color:var(--muted);cursor:pointer;user-select:none;white-space:nowrap;
-}
+.hidden-toggle{display:flex;align-items:center;gap:0.35rem;font-size:0.62rem;color:var(--muted);cursor:pointer;user-select:none;white-space:nowrap;}
 .hidden-toggle input{accent-color:var(--ac);}
 .fs-statbar{
   display:flex;align-items:center;gap:1.5rem;padding:0.35rem 1.5rem;
@@ -223,20 +231,12 @@ body::after{
 .fs-table thead th:hover{color:var(--text);}
 .fs-table thead th.asc::after{content:' ↑';}
 .fs-table thead th.desc::after{content:' ↓';}
-.fs-table tbody tr{
-  border-bottom:1px solid var(--border);
-  transition:background 0.12s;
-  animation:rowIn 0.18s ease both;
-}
+.fs-table tbody tr{border-bottom:1px solid var(--border);transition:background 0.12s;animation:rowIn 0.18s ease both;}
 .fs-table tbody tr:hover{background:var(--s2);}
 @keyframes rowIn{from{opacity:0;transform:translateX(-5px);}to{opacity:1;transform:none;}}
 .fs-table td{padding:0.5rem 1rem;font-size:0.7rem;vertical-align:middle;}
 .td-icon{width:38px;padding-right:0;}
-.fs-ico{
-  width:28px;height:28px;display:flex;align-items:center;
-  justify-content:center;border-radius:4px;font-size:1rem;
-  background:var(--s3);flex-shrink:0;
-}
+.fs-ico{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:4px;font-size:1rem;background:var(--s3);flex-shrink:0;}
 .td-name{min-width:200px;}
 .fs-name{display:flex;align-items:center;gap:0.55rem;}
 .name-text{color:var(--text);font-size:0.72rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:320px;}
@@ -262,6 +262,147 @@ body::after{
 .row-act:hover{border-color:var(--ac2);color:var(--ac2);}
 .row-act.dir:hover{border-color:var(--warn);color:var(--warn);}
 .fs-empty{text-align:center;padding:4rem;color:var(--muted2);font-size:0.7rem;letter-spacing:0.1em;}
+
+/* ══ COMMANDS PANE ══ */
+.cmd-pane{flex-direction:row;overflow:hidden;}
+
+.cmd-left{
+  width:380px;flex-shrink:0;display:flex;flex-direction:column;
+  background:var(--s1);border-right:1px solid var(--border);
+}
+.cmd-left-hdr{
+  padding:0.9rem 1.2rem;border-bottom:1px solid var(--border);
+  font-size:0.62rem;letter-spacing:0.18em;color:var(--muted);text-transform:uppercase;
+  display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
+}
+.cmd-left-hdr span{color:var(--ac);font-weight:700;}
+.cmd-form{padding:1rem 1.2rem;display:flex;flex-direction:column;gap:0.6rem;flex-shrink:0;}
+.cmd-label-input{
+  background:var(--s2);border:1px solid var(--border);color:var(--text);
+  padding:0.45rem 0.7rem;font-family:var(--mono);font-size:0.7rem;
+  border-radius:3px;width:100%;transition:border-color 0.2s;outline:none;
+}
+.cmd-label-input:focus{border-color:var(--ac);}
+.cmd-label-input::placeholder{color:var(--muted2);}
+.cmd-textarea{
+  background:var(--s2);border:1px solid var(--border);color:var(--text);
+  padding:0.6rem 0.7rem;font-family:var(--mono);font-size:0.72rem;
+  line-height:1.5;border-radius:3px;width:100%;min-height:120px;
+  resize:vertical;transition:border-color 0.2s;outline:none;
+  /* Critical: disable all auto-correction to preserve exact chars */
+  autocomplete:off;autocorrect:off;autocapitalize:off;spellcheck:false;
+  white-space:pre;overflow-wrap:normal;overflow-x:auto;tab-size:4;
+}
+.cmd-textarea:focus{border-color:var(--ac);}
+.cmd-textarea::placeholder{color:var(--muted2);}
+.cmd-form-row{display:flex;gap:0.5rem;}
+.btn-save{
+  flex:1;background:var(--ac);color:#000;border:none;padding:0.5rem 1rem;
+  font-family:var(--mono);font-size:0.68rem;font-weight:700;
+  letter-spacing:0.12em;cursor:pointer;text-transform:uppercase;
+  border-radius:3px;transition:opacity 0.2s;
+}
+.btn-save:hover{opacity:0.82;}
+.btn-clear{
+  background:transparent;border:1px solid var(--border2);color:var(--muted);
+  padding:0.5rem 0.8rem;font-family:var(--mono);font-size:0.68rem;
+  cursor:pointer;border-radius:3px;transition:all 0.2s;
+}
+.btn-clear:hover{border-color:var(--danger);color:var(--danger);}
+.cmd-search-wrap{padding:0 1.2rem 0.6rem;flex-shrink:0;}
+.cmd-search{
+  background:var(--s2);border:1px solid var(--border);color:var(--text);
+  padding:0.35rem 0.7rem;font-family:var(--mono);font-size:0.68rem;
+  border-radius:3px;width:100%;outline:none;transition:border-color 0.2s;
+}
+.cmd-search:focus{border-color:var(--ac);}
+.cmd-search::placeholder{color:var(--muted2);}
+.cmd-list{flex:1;overflow-y:auto;}
+.cmd-item{
+  border-bottom:1px solid var(--border);padding:0.7rem 1.2rem;
+  cursor:pointer;transition:background 0.15s;
+  display:flex;align-items:center;gap:0.6rem;
+}
+.cmd-item:hover{background:var(--s2);}
+.cmd-item.selected{background:var(--s3);border-left:2px solid var(--ac);}
+.cmd-item-icon{font-size:0.9rem;flex-shrink:0;}
+.cmd-item-info{flex:1;min-width:0;}
+.cmd-item-label{font-size:0.7rem;font-weight:600;color:var(--text);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cmd-item-preview{font-size:0.6rem;color:var(--muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:0.15rem;}
+.cmd-item-acts{display:flex;gap:0.25rem;flex-shrink:0;}
+.cmd-act{
+  background:transparent;border:1px solid transparent;color:var(--muted);
+  padding:0.2rem 0.4rem;font-size:0.65rem;font-family:var(--mono);
+  cursor:pointer;border-radius:2px;transition:all 0.15s;
+}
+.cmd-act:hover{border-color:var(--ac2);color:var(--ac2);}
+.cmd-act.del:hover{border-color:var(--danger);color:var(--danger);}
+.cmd-empty{text-align:center;padding:2.5rem 1rem;color:var(--muted2);font-size:0.68rem;letter-spacing:0.07em;}
+
+.cmd-right{
+  flex:1;display:flex;flex-direction:column;background:var(--bg);overflow:hidden;
+}
+.cmd-right-hdr{
+  padding:0.75rem 1.5rem;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;gap:0.8rem;flex-shrink:0;
+  background:var(--s1);
+}
+.cmd-right-title{font-size:0.78rem;font-weight:600;color:var(--text);flex:1;min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cmd-right-meta{font-size:0.6rem;color:var(--muted);white-space:nowrap;}
+.cmd-right-body{flex:1;overflow:auto;padding:1.2rem 1.5rem;display:flex;flex-direction:column;gap:0.8rem;}
+.cmd-placeholder{
+  flex:1;display:flex;align-items:center;justify-content:center;
+  flex-direction:column;gap:0.7rem;color:var(--muted2);font-size:0.7rem;
+  letter-spacing:0.08em;text-align:center;
+}
+.cmd-placeholder-ico{font-size:2.5rem;opacity:0.3;}
+.cmd-code-wrap{
+  background:var(--s1);border:1px solid var(--border);border-radius:4px;
+  overflow:hidden;flex:1;display:flex;flex-direction:column;
+}
+.cmd-code-topbar{
+  display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.9rem;
+  background:var(--s2);border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.cmd-code-lang{font-size:0.6rem;letter-spacing:0.1em;color:var(--muted);text-transform:uppercase;flex:1;}
+.cmd-copy-btn{
+  background:transparent;border:1px solid var(--border2);color:var(--muted);
+  padding:0.25rem 0.7rem;font-family:var(--mono);font-size:0.62rem;
+  cursor:pointer;border-radius:2px;transition:all 0.2s;letter-spacing:0.08em;
+}
+.cmd-copy-btn:hover{border-color:var(--ac2);color:var(--ac2);}
+.cmd-copy-btn.copied{border-color:var(--ac2);color:var(--ac2);}
+.cmd-code{
+  flex:1;padding:1rem 1.2rem;overflow:auto;
+  font-family:var(--mono);font-size:0.74rem;line-height:1.65;
+  color:var(--text);white-space:pre;tab-size:4;
+  min-height:120px;
+}
+.cmd-edit-area{
+  background:var(--s2);border:1px solid var(--ac);color:var(--text);
+  padding:0.8rem 1rem;font-family:var(--mono);font-size:0.74rem;
+  line-height:1.65;border-radius:3px;width:100%;min-height:200px;
+  resize:vertical;outline:none;white-space:pre;overflow-wrap:normal;
+  overflow-x:auto;tab-size:4;flex:1;
+  autocomplete:off;autocorrect:off;autocapitalize:off;spellcheck:false;
+}
+.cmd-edit-row{display:flex;gap:0.5rem;flex-shrink:0;}
+.cmd-char-count{font-size:0.6rem;color:var(--muted);padding-top:0.3rem;}
+.btn-update{
+  background:var(--ac);color:#000;border:none;padding:0.45rem 1.1rem;
+  font-family:var(--mono);font-size:0.67rem;font-weight:700;
+  letter-spacing:0.1em;cursor:pointer;text-transform:uppercase;border-radius:3px;
+}
+.btn-update:hover{opacity:0.82;}
+.btn-cancel{
+  background:transparent;border:1px solid var(--border2);color:var(--muted);
+  padding:0.45rem 0.8rem;font-family:var(--mono);font-size:0.67rem;
+  cursor:pointer;border-radius:3px;transition:all 0.2s;
+}
+.btn-cancel:hover{border-color:var(--muted);color:var(--text);}
 
 /* ── Scrollbar ── */
 ::-webkit-scrollbar{width:4px;height:4px;}
@@ -294,6 +435,9 @@ body::after{
     <div class="tab" data-pane="browse" onclick="switchTab('browse')">
       <span>📂</span> File Browser
     </div>
+    <div class="tab" data-pane="commands" onclick="switchTab('commands')">
+      <span>⌨</span> Commands
+    </div>
   </div>
   <div class="topbar-right">
     <a href="/download-all" class="btn-sm primary">⬇ Download All (.zip)</a>
@@ -308,7 +452,6 @@ body::after{
     <div class="dz-text">Drop files here or <strong>browse</strong></div>
     <div class="dz-sub">Multiple files · Images · PDFs · Any format</div>
   </div>
-
   <div id="prog-wrap">
     <div class="prog-meta">
       <span id="prog-txt">Uploading…</span>
@@ -316,13 +459,11 @@ body::after{
     </div>
     <div class="prog-track"><div class="prog-fill" id="prog-fill"></div></div>
   </div>
-
   <div id="staging">
     <div class="staging-hdr">Queued — <span id="q-count">0</span> file(s)</div>
     <div id="staged-list"></div>
     <button class="btn-upload" onclick="doUpload()">⬆ Upload Now</button>
   </div>
-
   <div class="up-sec-hdr">Uploaded Files</div>
   <div id="file-grid"></div>
 </div>
@@ -364,19 +505,72 @@ body::after{
   </div>
 </div>
 
+<!-- ══ COMMANDS PANE ══ -->
+<div class="pane cmd-pane" id="pane-commands">
+
+  <!-- Left panel: add + list -->
+  <div class="cmd-left">
+    <div class="cmd-left-hdr">
+      Commands <span id="cmd-count">0</span>
+    </div>
+
+    <div class="cmd-form">
+      <input class="cmd-label-input" id="cmd-label" type="text"
+        placeholder="Label / description (optional)"
+        autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <textarea class="cmd-textarea" id="cmd-input"
+        placeholder="Paste command here…&#10;&#10;Every character is preserved exactly."
+        autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+      <div class="cmd-form-row">
+        <button class="btn-save" onclick="cmdSave()">⊕ Save Command</button>
+        <button class="btn-clear" onclick="cmdClearForm()">✕ Clear</button>
+      </div>
+    </div>
+
+    <div class="cmd-search-wrap">
+      <input class="cmd-search" id="cmd-search" type="text"
+        placeholder="⌕  Search commands…" oninput="renderCmdList()">
+    </div>
+
+    <div class="cmd-list" id="cmd-list">
+      <div class="cmd-empty">No commands saved yet.</div>
+    </div>
+  </div>
+
+  <!-- Right panel: detail / edit -->
+  <div class="cmd-right" id="cmd-right">
+    <div class="cmd-right-hdr">
+      <span class="cmd-right-title" id="cmd-right-title">Select a command</span>
+      <span class="cmd-right-meta" id="cmd-right-meta"></span>
+    </div>
+    <div class="cmd-right-body" id="cmd-right-body">
+      <div class="cmd-placeholder">
+        <div class="cmd-placeholder-ico">⌨</div>
+        <div>Select a command from the list<br>or save a new one above</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
 </div><!-- /shell -->
 <div id="toast"></div>
 
 <script>
-// ── Tab switching ─────────────────────────────────
+// ══════════════════════════════════════════════════
+//  Tab switching
+// ══════════════════════════════════════════════════
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.pane === name));
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + name));
-  if (name === 'browse' && !fsBrowsed) { fsBrowsed = true; fsHome(); }
+  if (name === 'browse'   && !fsBrowsed)  { fsBrowsed = true; fsHome(); }
+  if (name === 'commands' && !cmdLoaded)  { cmdLoaded = true; cmdLoadAll(); }
 }
-let fsBrowsed = false;
+let fsBrowsed = false, cmdLoaded = false;
 
-// ── Upload ────────────────────────────────────────
+// ══════════════════════════════════════════════════
+//  Upload
+// ══════════════════════════════════════════════════
 const dz = document.getElementById('dropzone');
 const fi = document.getElementById('file-input');
 let staged = [];
@@ -390,7 +584,6 @@ function stageFiles(files) {
   staged = [...staged, ...files];
   renderStaging();
 }
-
 function renderStaging() {
   const wrap = document.getElementById('staging');
   const list = document.getElementById('staged-list');
@@ -421,7 +614,6 @@ function renderStaging() {
     list.appendChild(item);
   });
 }
-
 function doUpload() {
   if (!staged.length) return;
   const fd = new FormData();
@@ -436,40 +628,35 @@ function doUpload() {
   xhr.upload.onprogress = e => {
     if (e.lengthComputable) {
       const p = Math.round(e.loaded / e.total * 100);
-      fill.style.width = p + '%';
-      pct.textContent = p + '%';
+      fill.style.width = p + '%'; pct.textContent = p + '%';
       txt.textContent = `Uploading ${staged.length} file(s)…`;
     }
   };
   xhr.onload = () => {
     fill.style.width = '100%';
     setTimeout(() => { wrap.style.display = 'none'; fill.style.width = '0%'; }, 700);
-    staged = [];
-    toast('✓ Upload complete');
-    loadUploads();
+    staged = []; toast('✓ Upload complete'); loadUploads();
   };
   xhr.onerror = () => toast('✗ Upload failed', true);
   xhr.open('POST', '/upload');
   xhr.send(fd);
 }
-
 function loadUploads() {
   fetch('/files').then(r => r.json()).then(renderGrid);
 }
-
 function renderGrid(files) {
   const grid = document.getElementById('file-grid');
   grid.innerHTML = '';
   if (!files.length) { grid.innerHTML = '<div class="empty-msg">No uploads yet.</div>'; return; }
   files.forEach(f => {
-    const ext = f.name.split('.').pop().toLowerCase();
+    const ext   = f.name.split('.').pop().toLowerCase();
     const isImg = ['jpg','jpeg','png','gif','webp','bmp','svg'].includes(ext);
     const isPdf = ext === 'pdf';
     const url   = '/uploads/' + encodeURIComponent(f.name);
     let preview;
-    if (isImg) preview = `<img src="${url}" alt="" loading="lazy">`;
+    if (isImg)      preview = `<img src="${url}" alt="" loading="lazy">`;
     else if (isPdf) preview = `<div class="pdf-wrap"><iframe src="${url}#toolbar=0&navpanes=0" scrolling="no"></iframe></div>`;
-    else preview = `<div class="bigico">${extIcon(ext)}</div>`;
+    else            preview = `<div class="bigico">${extIcon(ext)}</div>`;
     const card = document.createElement('div');
     card.className = 'f-card';
     card.innerHTML = `
@@ -487,17 +674,15 @@ function renderGrid(files) {
     grid.appendChild(card);
   });
 }
-
 function delUpload(name) {
   fetch('/delete/' + encodeURIComponent(name), { method: 'DELETE' })
     .then(() => { toast('✓ Deleted ' + name); loadUploads(); });
 }
 
-// ── File Browser ──────────────────────────────────
-let fsPath    = '';
-let fsDirData = [];
-let fsSortKey = 'name';
-let fsSortAsc = true;
+// ══════════════════════════════════════════════════
+//  File Browser
+// ══════════════════════════════════════════════════
+let fsPath = '', fsDirData = [], fsSortKey = 'name', fsSortAsc = true;
 
 function fsHome()  { fsNavigate(''); }
 function fsGoUp()  {
@@ -506,7 +691,6 @@ function fsGoUp()  {
   fsNavigate(parts.join('/'));
 }
 function fsNavigate(p) { fsPath = p; fsLoad(); }
-
 function fsLoad() {
   const hidden = document.getElementById('show-hidden').checked;
   fetch(`/fs?path=${encodeURIComponent(fsPath)}&hidden=${hidden}`)
@@ -521,7 +705,6 @@ function fsLoad() {
     })
     .catch(() => toast('Failed to load directory', true));
 }
-
 function renderBreadcrumb(parts) {
   const bc = document.getElementById('breadcrumb');
   bc.innerHTML = '';
@@ -544,17 +727,15 @@ function renderBreadcrumb(parts) {
     bc.appendChild(span);
   });
 }
-
 function renderStatBar(entries) {
   const dirs  = entries.filter(e => e.is_dir).length;
   const files = entries.filter(e => !e.is_dir).length;
   const total = entries.filter(e => !e.is_dir).reduce((s, e) => s + e.size, 0);
   document.getElementById('fs-statbar').innerHTML =
-    `<span><span class="sdot d"></span>${dirs} folder${dirs !== 1 ? 's' : ''}</span>
-     <span><span class="sdot f"></span>${files} file${files !== 1 ? 's' : ''}</span>
+    `<span><span class="sdot d"></span>${dirs} folder${dirs!==1?'s':''}</span>
+     <span><span class="sdot f"></span>${files} file${files!==1?'s':''}</span>
      <span>Total size: ${fmtSize(total)}</span>`;
 }
-
 function fsSort(key) {
   fsSortAsc = fsSortKey === key ? !fsSortAsc : true;
   fsSortKey = key;
@@ -563,14 +744,11 @@ function fsSort(key) {
   });
   renderFsTable();
 }
-
 function renderFsTable() {
   const q     = document.getElementById('fs-search').value.toLowerCase();
   const tbody = document.getElementById('fs-tbody');
   tbody.innerHTML = '';
-
   let entries = fsDirData.filter(e => !q || e.name.toLowerCase().includes(q));
-
   entries.sort((a, b) => {
     if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
     let av, bv;
@@ -581,18 +759,15 @@ function renderFsTable() {
     if (av > bv) return fsSortAsc ?  1 : -1;
     return 0;
   });
-
   if (!entries.length) {
     tbody.innerHTML = '<tr><td colspan="6" class="fs-empty">Nothing here.</td></tr>';
     return;
   }
-
   entries.forEach((e, i) => {
     const ext   = e.is_dir ? '' : e.name.split('.').pop().toLowerCase();
     const icon  = e.is_dir ? '📁' : extIcon(ext);
     const ebCls = e.is_dir ? '' : extBadgeCls(ext);
     const relp  = fsPath ? fsPath + '/' + e.name : e.name;
-
     const tr = document.createElement('tr');
     tr.style.animationDelay = (i * 12) + 'ms';
     tr.innerHTML = `
@@ -619,7 +794,314 @@ function renderFsTable() {
   });
 }
 
-// ── Helpers ───────────────────────────────────────
+// ══════════════════════════════════════════════════
+//  COMMANDS — exact character preservation
+//  Transport: JSON body (no URL encoding distortion)
+//  Display  : textContent only (never innerHTML)
+//  Storage  : raw string in JSON file on server
+// ══════════════════════════════════════════════════
+let cmdData    = [];   // [{id, label, cmd, created}]
+let cmdSel     = null; // selected id
+let cmdEditing = false;
+
+// ── Load all ──────────────────────────────────────
+function cmdLoadAll() {
+  fetch('/cmd')
+    .then(r => r.json())
+    .then(data => { cmdData = data; renderCmdList(); })
+    .catch(() => toast('Failed to load commands', true));
+}
+
+// ── Save new ──────────────────────────────────────
+function cmdSave() {
+  // Read value directly from textarea DOM — preserves every char
+  const raw   = document.getElementById('cmd-input').value;
+  const label = document.getElementById('cmd-label').value.trim();
+
+  if (!raw.length) { toast('⚠ Command is empty', true); return; }
+
+  // Send as JSON body — no character distortion
+  fetch('/cmd', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ cmd: raw, label: label || null })
+  })
+  .then(r => r.json())
+  .then(saved => {
+    cmdData.unshift(saved);
+    renderCmdList();
+    cmdClearForm();
+    cmdSelect(saved.id);
+    toast('✓ Command saved');
+  })
+  .catch(() => toast('✗ Save failed', true));
+}
+
+// ── Clear form ────────────────────────────────────
+function cmdClearForm() {
+  document.getElementById('cmd-input').value = '';
+  document.getElementById('cmd-label').value = '';
+}
+
+// ── Delete ────────────────────────────────────────
+function cmdDelete(id, ev) {
+  ev.stopPropagation();
+  fetch('/cmd/' + encodeURIComponent(id), { method: 'DELETE' })
+    .then(r => r.json())
+    .then(() => {
+      cmdData = cmdData.filter(c => c.id !== id);
+      if (cmdSel === id) { cmdSel = null; cmdShowPlaceholder(); }
+      renderCmdList();
+      toast('✓ Deleted');
+    })
+    .catch(() => toast('✗ Delete failed', true));
+}
+
+// ── Edit (load into right panel) ──────────────────
+function cmdStartEdit(id, ev) {
+  ev.stopPropagation();
+  cmdSelect(id);
+  cmdShowEdit(id);
+}
+
+function cmdShowEdit(id) {
+  const item = cmdData.find(c => c.id === id);
+  if (!item) return;
+  cmdEditing = true;
+
+  const body  = document.getElementById('cmd-right-body');
+  const title = document.getElementById('cmd-right-title');
+  const meta  = document.getElementById('cmd-right-meta');
+  title.textContent = '✏ Editing: ' + (item.label || item.id);
+  meta.textContent  = item.cmd.length + ' chars';
+
+  body.innerHTML = '';
+
+  // Label input
+  const labelWrap = document.createElement('div');
+  const labelInp  = document.createElement('input');
+  labelInp.className = 'cmd-label-input';
+  labelInp.type = 'text';
+  labelInp.placeholder = 'Label / description (optional)';
+  labelInp.autocomplete = 'off';
+  labelInp.setAttribute('autocorrect','off');
+  labelInp.setAttribute('autocapitalize','off');
+  labelInp.setAttribute('spellcheck','false');
+  // Set value via value property — preserves exact text
+  labelInp.value = item.label || '';
+  labelWrap.appendChild(labelInp);
+  body.appendChild(labelWrap);
+
+  // Command textarea — set via .value to preserve every character
+  const ta = document.createElement('textarea');
+  ta.className = 'cmd-edit-area';
+  ta.setAttribute('autocomplete','off');
+  ta.setAttribute('autocorrect','off');
+  ta.setAttribute('autocapitalize','off');
+  ta.setAttribute('spellcheck','false');
+  ta.value = item.cmd;  // direct assignment, no encoding
+  body.appendChild(ta);
+
+  // Char counter
+  const counter = document.createElement('div');
+  counter.className = 'cmd-char-count';
+  counter.textContent = ta.value.length + ' characters';
+  ta.addEventListener('input', () => {
+    counter.textContent = ta.value.length + ' characters';
+    meta.textContent = ta.value.length + ' chars';
+  });
+  body.appendChild(counter);
+
+  // Buttons
+  const row = document.createElement('div');
+  row.className = 'cmd-edit-row';
+
+  const saveBtn = document.createElement('button');
+  saveBtn.className = 'btn-update';
+  saveBtn.textContent = '✓ Update';
+  saveBtn.onclick = () => {
+    // Read directly from textarea .value
+    const newCmd   = ta.value;
+    const newLabel = labelInp.value.trim();
+    fetch('/cmd/' + encodeURIComponent(id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ cmd: newCmd, label: newLabel || null })
+    })
+    .then(r => r.json())
+    .then(updated => {
+      const idx = cmdData.findIndex(c => c.id === id);
+      if (idx !== -1) cmdData[idx] = updated;
+      renderCmdList();
+      cmdEditing = false;
+      cmdShowDetail(id);
+      toast('✓ Updated');
+    })
+    .catch(() => toast('✗ Update failed', true));
+  };
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn-cancel';
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.onclick = () => { cmdEditing = false; cmdShowDetail(id); };
+
+  row.appendChild(saveBtn);
+  row.appendChild(cancelBtn);
+  body.appendChild(row);
+}
+
+// ── Show detail view ──────────────────────────────
+function cmdShowDetail(id) {
+  const item = cmdData.find(c => c.id === id);
+  if (!item) return;
+
+  document.getElementById('cmd-right-title').textContent = item.label || item.id;
+  document.getElementById('cmd-right-meta').textContent  =
+    item.cmd.length + ' chars · ' + (item.created || '');
+
+  const body = document.getElementById('cmd-right-body');
+  body.innerHTML = '';
+
+  // Code block — display using textContent only
+  const wrap = document.createElement('div');
+  wrap.className = 'cmd-code-wrap';
+
+  const topbar = document.createElement('div');
+  topbar.className = 'cmd-code-topbar';
+
+  const lang = document.createElement('span');
+  lang.className = 'cmd-code-lang';
+  lang.textContent = 'command — ' + item.cmd.length + ' characters';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'cmd-copy-btn';
+  copyBtn.textContent = '⎘ Copy';
+  copyBtn.onclick = () => {
+    // Use clipboard API with raw .cmd string — exact char transfer
+    navigator.clipboard.writeText(item.cmd).then(() => {
+      copyBtn.textContent = '✓ Copied!';
+      copyBtn.classList.add('copied');
+      setTimeout(() => {
+        copyBtn.textContent = '⎘ Copy';
+        copyBtn.classList.remove('copied');
+      }, 2000);
+    }).catch(() => {
+      // Fallback: select text in a hidden textarea
+      const tmp = document.createElement('textarea');
+      tmp.style.position = 'fixed';
+      tmp.style.opacity  = '0';
+      tmp.value = item.cmd;  // direct .value assignment
+      document.body.appendChild(tmp);
+      tmp.select();
+      document.execCommand('copy');
+      document.body.removeChild(tmp);
+      copyBtn.textContent = '✓ Copied!';
+      setTimeout(() => copyBtn.textContent = '⎘ Copy', 2000);
+    });
+  };
+
+  topbar.appendChild(lang);
+  topbar.appendChild(copyBtn);
+  wrap.appendChild(topbar);
+
+  const pre = document.createElement('div');
+  pre.className = 'cmd-code';
+  // textContent = exact string, no HTML interpretation
+  pre.textContent = item.cmd;
+  wrap.appendChild(pre);
+  body.appendChild(wrap);
+}
+
+// ── Select item ───────────────────────────────────
+function cmdSelect(id) {
+  cmdSel = id;
+  renderCmdList();
+  if (!cmdEditing) cmdShowDetail(id);
+}
+
+function cmdShowPlaceholder() {
+  document.getElementById('cmd-right-title').textContent = 'Select a command';
+  document.getElementById('cmd-right-meta').textContent  = '';
+  document.getElementById('cmd-right-body').innerHTML =
+    `<div class="cmd-placeholder">
+      <div class="cmd-placeholder-ico">⌨</div>
+      <div>Select a command from the list<br>or save a new one above</div>
+     </div>`;
+}
+
+// ── Render list ───────────────────────────────────
+function renderCmdList() {
+  const q    = (document.getElementById('cmd-search').value || '').toLowerCase();
+  const list = document.getElementById('cmd-list');
+  document.getElementById('cmd-count').textContent = cmdData.length;
+  list.innerHTML = '';
+
+  const filtered = cmdData.filter(c =>
+    !q ||
+    (c.label  || '').toLowerCase().includes(q) ||
+    (c.cmd    || '').toLowerCase().includes(q)
+  );
+
+  if (!filtered.length) {
+    const empty = document.createElement('div');
+    empty.className = 'cmd-empty';
+    empty.textContent = cmdData.length ? 'No matches.' : 'No commands saved yet.';
+    list.appendChild(empty);
+    return;
+  }
+
+  filtered.forEach(item => {
+    const el = document.createElement('div');
+    el.className = 'cmd-item' + (cmdSel === item.id ? ' selected' : '');
+    el.onclick = () => { cmdEditing = false; cmdSelect(item.id); };
+
+    const icon = document.createElement('div');
+    icon.className = 'cmd-item-icon';
+    icon.textContent = '⌨';
+
+    const info = document.createElement('div');
+    info.className = 'cmd-item-info';
+
+    const lbl = document.createElement('div');
+    lbl.className = 'cmd-item-label';
+    // textContent — exact, no HTML
+    lbl.textContent = item.label || item.cmd.split('\n')[0].slice(0, 40) || '(empty)';
+
+    const prev = document.createElement('div');
+    prev.className = 'cmd-item-preview';
+    prev.textContent = item.cmd.replace(/\n/g, '  ').slice(0, 60);
+
+    info.appendChild(lbl);
+    info.appendChild(prev);
+
+    const acts = document.createElement('div');
+    acts.className = 'cmd-item-acts';
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'cmd-act';
+    editBtn.textContent = '✏';
+    editBtn.title = 'Edit';
+    editBtn.onclick = e => cmdStartEdit(item.id, e);
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'cmd-act del';
+    delBtn.textContent = '✕';
+    delBtn.title = 'Delete';
+    delBtn.onclick = e => cmdDelete(item.id, e);
+
+    acts.appendChild(editBtn);
+    acts.appendChild(delBtn);
+
+    el.appendChild(icon);
+    el.appendChild(info);
+    el.appendChild(acts);
+    list.appendChild(el);
+  });
+}
+
+// ══════════════════════════════════════════════════
+//  Shared helpers
+// ══════════════════════════════════════════════════
 function extIcon(ext) {
   const m = {
     jpg:'🖼',jpeg:'🖼',png:'🖼',gif:'🖼',webp:'🖼',svg:'🖼',bmp:'🖼',ico:'🖼',
@@ -637,7 +1119,6 @@ function extIcon(ext) {
   };
   return m[ext] || '📎';
 }
-
 function extBadgeCls(ext) {
   if (['jpg','jpeg','png','gif','webp','svg','bmp','ico'].includes(ext))       return 'ext-img';
   if (['py','js','ts','html','css','php','sh','bat','ps1','c','cpp','go','rs','rb','java'].includes(ext)) return 'ext-code';
@@ -648,16 +1129,14 @@ function extBadgeCls(ext) {
   if (['json','xml','yaml','toml','csv','xls','xlsx','db','sql','sqlite'].includes(ext)) return 'ext-data';
   return 'ext-other';
 }
-
 function fmtSize(b) {
   if (!b) return '0 B';
   if (b < 1024)       return b + ' B';
-  if (b < 1048576)    return (b / 1024).toFixed(1) + ' KB';
-  if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB';
-  return (b / 1073741824).toFixed(2) + ' GB';
+  if (b < 1048576)    return (b/1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b/1048576).toFixed(1) + ' MB';
+  return (b/1073741824).toFixed(2) + ' GB';
 }
-
-function toast(msg, err = false) {
+function toast(msg, err=false) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.className = 'show' + (err ? ' err' : '');
@@ -670,6 +1149,7 @@ loadUploads();
 </body>
 </html>
 """
+
 
 # ── Upload routes ─────────────────────────────────────────────
 
@@ -726,11 +1206,9 @@ def fs_list():
     import stat as statmod
     relpath     = request.args.get('path', '')
     show_hidden = request.args.get('hidden', 'false').lower() == 'true'
-
     target = safe_path(relpath)
     if target is None or not os.path.isdir(target):
         return jsonify({'error': 'Invalid or inaccessible path'}), 400
-
     entries = []
     try:
         for name in sorted(os.listdir(target), key=str.lower):
@@ -751,7 +1229,6 @@ def fs_list():
                     perms += ('r' if mode & bits[0] else '-')
                     perms += ('w' if mode & bits[1] else '-')
                     perms += ('x' if mode & bits[2] else '-')
-
                 entries.append({
                     'name':         name,
                     'is_dir':       is_dir,
@@ -764,10 +1241,8 @@ def fs_list():
                 continue
     except PermissionError:
         return jsonify({'error': 'Permission denied'}), 403
-
     path_parts = [p for p in relpath.replace('\\', '/').split('/') if p]
     return jsonify({'entries': entries, 'path_parts': path_parts})
-
 
 @app.route('/fs/download')
 def fs_download():
@@ -777,6 +1252,52 @@ def fs_download():
         return jsonify({'error': 'File not found'}), 404
     return send_from_directory(os.path.dirname(target), os.path.basename(target), as_attachment=True)
 
+# ── Commands routes ───────────────────────────────────────────
+
+@app.route('/cmd', methods=['GET'])
+def cmd_list():
+    return jsonify(load_commands())
+
+@app.route('/cmd', methods=['POST'])
+def cmd_create():
+    # Read raw JSON — no URL decoding, no form parsing distortion
+    data = request.get_json(force=True, silent=True) or {}
+    cmd  = data.get('cmd', '')
+    if not isinstance(cmd, str):
+        return jsonify({'error': 'cmd must be a string'}), 400
+    label   = data.get('label') or None
+    now     = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    entry   = {'id': str(uuid.uuid4()), 'label': label, 'cmd': cmd, 'created': now}
+    cmds    = load_commands()
+    cmds.insert(0, entry)
+    save_commands(cmds)
+    return jsonify(entry), 201
+
+@app.route('/cmd/<cmd_id>', methods=['PUT'])
+def cmd_update(cmd_id):
+    data  = request.get_json(force=True, silent=True) or {}
+    cmd   = data.get('cmd', '')
+    if not isinstance(cmd, str):
+        return jsonify({'error': 'cmd must be a string'}), 400
+    label = data.get('label') or None
+    cmds  = load_commands()
+    for entry in cmds:
+        if entry['id'] == cmd_id:
+            entry['cmd']   = cmd   # stored as-is, exact string
+            entry['label'] = label
+            entry['updated'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            save_commands(cmds)
+            return jsonify(entry)
+    return jsonify({'error': 'not found'}), 404
+
+@app.route('/cmd/<cmd_id>', methods=['DELETE'])
+def cmd_delete(cmd_id):
+    cmds = load_commands()
+    new  = [c for c in cmds if c['id'] != cmd_id]
+    if len(new) == len(cmds):
+        return jsonify({'error': 'not found'}), 404
+    save_commands(new)
+    return jsonify({'deleted': cmd_id})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
