@@ -1,0 +1,2 @@
+# stdlib only — no external packages required
+# System dependency: whois CLI (sudo apt install whois)
