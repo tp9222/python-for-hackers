@@ -1,0 +1,2 @@
+# stdlib only — tkinter is included with Python on Windows/macOS
+# On Linux: sudo apt install python3-tk
