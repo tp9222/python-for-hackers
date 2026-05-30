@@ -1,0 +1,2 @@
+# stdlib only — no external packages required
+# System dependency: rustscan (cargo install rustscan)
