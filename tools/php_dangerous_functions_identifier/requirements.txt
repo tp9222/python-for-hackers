@@ -1,0 +1,2 @@
+# No Python dependencies — PHP scripts only
+# System dependency: PHP CLI (sudo apt install php-cli)
