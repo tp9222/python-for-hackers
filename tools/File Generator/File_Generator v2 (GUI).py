@@ -175,8 +175,8 @@ def gen_exe(path: str, size: int, cb):
         # ── DOS header (64 bytes) ────────────────────────────────────────────
         dos = bytearray(64)
         dos[0:2]   = b"MZ"
-        dos[2:4]   = struct.pack("<H", size & 0x1FF)        # bytes on last page
-        dos[4:6]   = struct.pack("<H", max(1, size >> 9))   # total pages
+        dos[2:4]   = struct.pack("<H", size % 512)          # bytes on last page
+        dos[4:6]   = struct.pack("<H", min(0xFFFF, max(1, (size + 511) >> 9)))  # total pages (16-bit field, legacy/ignored)
         dos[8:10]  = struct.pack("<H", 4)                   # header paragraphs
         dos[12:14] = struct.pack("<H", 0xFFFF)              # max alloc
         dos[16:18] = struct.pack("<H", 0xB8)                # initial SP
