@@ -296,6 +296,7 @@ def run_job(job_id, folders, dest_base, workers):
             item["status"] = "queued"
             for u, rel in files:
                 fname = os.path.relpath(rel, f["name"]) if rel.startswith(f["name"] + os.sep) else os.path.basename(rel)
+                item["_fileurls"][fname] = (u, rel)
                 if rel in item["_done_files"] or os.path.exists(os.path.join(dest_base, rel)):
                     item["files"][fname] = "done"
                 else:
@@ -303,7 +304,7 @@ def run_job(job_id, folders, dest_base, workers):
                 with seq_lock:
                     n = seq[0]
                     seq[0] += 1
-                pq.put((job["prio"].get(f["id"], 100), n, f["id"], u, rel))
+                pq.put((job["prio"].get(f["id"], 100), n, f["id"], u, rel, 0))
         except Exception as e:
             item["status"] = "error"
             item["errors"].append(str(e))
@@ -312,9 +313,13 @@ def run_job(job_id, folders, dest_base, workers):
     for t in scan_threads:
         t.start()
 
+    MAX_AUTO = job.get("max_retries", 2)
+
     def worker():
         while True:
             if stop.is_set():
+                return
+            if job.get("close"):
                 return
             pause = job.get("pause")
             if pause is not None:
@@ -323,13 +328,11 @@ def run_job(job_id, folders, dest_base, workers):
             if stop.is_set():
                 return
             try:
-                prio, n, fid, url, rel = pq.get(timeout=0.3)
+                prio, n, fid, url, rel, attempt = pq.get(timeout=0.3)
             except Exception:
-                if all(not t.is_alive() for t in scan_threads) and pq.empty():
-                    return
                 continue
             item = job["items"][fid]
-            if item["status"] in ("queued", "scanning"):
+            if item["status"] in ("queued", "scanning", "partial", "done"):
                 item["status"] = "downloading"
             dest = os.path.join(dest_base, rel)
             os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -337,29 +340,45 @@ def run_job(job_id, folders, dest_base, workers):
             if rel in item["_done_files"] or (os.path.exists(dest) and os.path.getsize(dest) > 0):
                 item["_done_files"].add(rel)
                 item["files"][fname] = "done"
-                item["done"] += 1
+                with job["lock"]:
+                    item["done"] = sum(1 for s in item["files"].values() if s in ("done", "error", "stopped"))
                 pq.task_done()
                 continue
             item["files"][fname] = "downloading"
             ok = False
+            err = None
             try:
                 ok = download_file(url, dest, item, job, stop, job.get("conns", 1))
             except Exception as e:
-                item["errors"].append(f"{rel}: {e}")
+                err = str(e)
             if ok:
                 item["_done_files"].add(rel)
                 item["files"][fname] = "done"
+            elif stop.is_set():
+                item["files"][fname] = "stopped"
+            elif attempt < MAX_AUTO:
+                item["files"][fname] = "retrying"
+                delay = 1.5 * (2 ** attempt)
+                pq.task_done()
+                threading.Thread(target=lambda p=prio, n=n, fid=fid, url=url, rel=rel, a=attempt, d=delay: (
+                    time.sleep(d), pq.put((p, n, fid, url, rel, a + 1))), daemon=True).start()
+                continue
             else:
-                item["files"][fname] = "stopped" if stop.is_set() else "error"
-            item["done"] += 1
+                if err:
+                    item["errors"].append(f"{rel}: {err}")
+                item["files"][fname] = "error"
+            with job["lock"]:
+                item["done"] = sum(1 for s in item["files"].values() if s in ("done", "error", "stopped"))
+                item["failed"] = sum(1 for s in item["files"].values() if s == "error")
             pq.task_done()
 
     pool = [threading.Thread(target=worker, daemon=True) for _ in range(max(1, workers))]
     for t in pool:
         t.start()
+    job["pool"] = pool
 
     def sampler():
-        while not job["finished"]:
+        while not job["close"]:
             now = _now()
             for item in job["items"].values():
                 item["_samp"].append((now, item["bytes"]))
@@ -373,20 +392,34 @@ def run_job(job_id, folders, dest_base, workers):
             time.sleep(0.5)
     threading.Thread(target=sampler, daemon=True).start()
 
-    for t in scan_threads:
-        t.join()
-    for t in pool:
-        t.join()
-
-    for item in job["items"].values():
-        if item["status"] in ("downloading", "queued", "scanning"):
+    def finalize_watch():
+        for t in scan_threads:
+            t.join()
+        while not job["close"]:
             if stop.is_set():
-                item["status"] = "stopped"
-            else:
-                item["status"] = "done" if not item["errors"] else "partial"
-        item["speed"] = 0.0
-    job["speed"] = 0.0
-    job["finished"] = True
+                break
+            total = sum(it["total"] for it in job["items"].values())
+            done = sum(it["done"] for it in job["items"].values())
+            inflight = any(v in ("downloading", "retrying")
+                           for it in job["items"].values() for v in it["files"].values())
+            if pq.empty() and not inflight and done >= total and not job.get("retry_pending"):
+                for item in job["items"].values():
+                    if item["status"] in ("downloading", "queued", "scanning"):
+                        item["status"] = "partial" if item["failed"] else "done"
+                    elif item["status"] == "partial" and not item["failed"]:
+                        item["status"] = "done"
+                    item["speed"] = 0.0
+                job["speed"] = 0.0
+                if not job["finished"]:
+                    job["finished"] = True
+            time.sleep(0.3)
+        if stop.is_set():
+            for item in job["items"].values():
+                if item["status"] in ("downloading", "queued", "scanning"):
+                    item["status"] = "stopped"
+                item["speed"] = 0.0
+            job["finished"] = True
+    threading.Thread(target=finalize_watch, daemon=True).start()
 
 
 @app.route("/")
@@ -419,12 +452,14 @@ def _start_job(folders, workers, dest_base, resume_state=None, conns=1):
             "name": f["name"], "total": 0, "done": 0, "status": "scanning",
             "errors": [], "bytes": 0, "speed": 0.0, "prio": prio[f["id"]],
             "_samp": [], "_done_files": done_files, "url": f["url"], "files": {},
+            "failed": 0, "_fileurls": {},
         }
     JOBS[job_id] = {
         "items": items, "stop": threading.Event(), "pause": threading.Event(),
         "finished": False, "dest": dest_base, "queue": PriorityQueue(),
         "prio": prio, "bytes": 0, "speed": 0.0, "_samp": [], "workers": workers,
-        "conns": max(1, min(16, conns)),
+        "conns": max(1, min(16, conns)), "lock": threading.Lock(),
+        "close": False, "max_retries": 2, "retry_pending": False,
         "folders": [{"id": f["id"], "name": f["name"], "url": f["url"],
                      "prio": prio[f["id"]]} for f in folders],
     }
@@ -521,6 +556,44 @@ def api_pause(job_id):
     return jsonify({"ok": True, "paused": paused})
 
 
+@app.route("/api/retry/<job_id>", methods=["POST"])
+def api_retry(job_id):
+    job = JOBS.get(job_id)
+    if not job:
+        return jsonify({"error": "unknown job"}), 404
+    if job["stop"].is_set() or job.get("close"):
+        return jsonify({"error": "job no longer active"}), 409
+    data = request.json or {}
+    only_fid = data.get("fid")
+    pq = job["queue"]
+    seq_base = int(time.time() * 1000)
+    requeued = 0
+    job["retry_pending"] = True
+    with job["lock"]:
+        for fid, item in job["items"].items():
+            if only_fid and fid != only_fid:
+                continue
+            failed_names = [n for n, s in item["files"].items() if s in ("error", "stopped")]
+            for name in failed_names:
+                entry = item["_fileurls"].get(name)
+                if not entry:
+                    continue
+                u, rel = entry
+                item["files"][name] = "queued"
+                requeued += 1
+                pq.put((job["prio"].get(fid, 100), seq_base + requeued, fid, u, rel, 0))
+            if failed_names and item["status"] in ("partial", "done"):
+                item["status"] = "queued"
+            item["done"] = sum(1 for s in item["files"].values() if s in ("done", "error", "stopped"))
+            item["failed"] = sum(1 for s in item["files"].values() if s == "error")
+    if requeued == 0:
+        job["retry_pending"] = False
+        return jsonify({"ok": True, "requeued": 0})
+    job["finished"] = False
+    job["retry_pending"] = False
+    return jsonify({"ok": True, "requeued": requeued})
+
+
 @app.route("/api/progress/<job_id>")
 def api_progress(job_id):
     def stream():
@@ -550,6 +623,7 @@ def api_stop(job_id):
     job = JOBS.get(job_id)
     if job:
         job["stop"].set()
+        job["close"] = True
     return jsonify({"ok": True})
 
 
@@ -638,6 +712,10 @@ header{display:flex;align-items:baseline;gap:14px;margin-bottom:22px}
 .fr-error .fi,.fr-stopped .fi{color:var(--red)}
 .fr-error .fn,.fr-stopped .fn{color:var(--red)}
 .fr-more,.fr-empty{color:var(--dim);justify-content:center;padding:4px}
+.fr-retrying .fi{color:var(--amber)}
+.fr-retrying .fn{color:var(--amber)}
+.retry-btn{margin-top:7px;background:transparent;border:1px solid var(--amber-line);color:var(--amber);cursor:pointer;font-size:11px;padding:4px 10px;border-radius:6px;font-family:inherit;font-weight:600}
+.retry-btn:hover{background:var(--amber-soft)}
 .tree{padding:8px 6px;max-height:62vh;overflow:auto}
 .row{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:7px;user-select:none}
 .row:hover{background:var(--panel-2)}
@@ -744,6 +822,7 @@ header{display:flex;align-items:baseline;gap:14px;margin-bottom:22px}
       <div class="card-h"><h2>Transfers</h2>
         <div class="hd-right">
           <span class="totspeed mono" id="totSpeed"></span>
+          <button class="btn" id="retryAllBtn" onclick="retryAll()" style="display:none;padding:5px 11px">↻ Retry failed</button>
           <button class="btn" id="pauseBtn" onclick="togglePause()" style="display:none;padding:5px 11px">Pause</button>
           <button class="btn" id="exportBtn" onclick="exportSession()" style="display:none;padding:5px 11px">Export</button>
           <button class="btn ghost-red" id="stopBtn" onclick="stopJob()" style="display:none;padding:5px 11px">Stop</button>
@@ -937,11 +1016,13 @@ function fmtSpeed(bps){
 }
 let jobOrder=[];
 let paused=false;
+let retryJob=null;
 function showJobControls(){
   $('#dlBtn').disabled=true;
   $('#stopBtn').style.display='';
   $('#pauseBtn').style.display='';
   $('#exportBtn').style.display='';
+  $('#retryAllBtn').style.display='none';
   paused=false;$('#pauseBtn').textContent='Pause';
 }
 function hideJobControls(){
@@ -1012,6 +1093,7 @@ function renderMon(folders){
       <div class="job-num"><span class="pct">0%</span><span class="cnt">—</span></div>
       <button class="files-toggle" onclick="toggleFiles('${f.id}')"><span class="caret">▸</span> files <span class="files-summary"></span></button>
       <div class="files-panel" style="display:none"><div class="files-list"></div></div>
+      <button class="retry-btn" onclick="retryFolder('${f.id}')" style="display:none">↻ Retry failed</button>
       <div class="errs" style="display:none"></div>`;
     mon.appendChild(j);
   }
@@ -1045,19 +1127,19 @@ function toggleFiles(fid){
   if(open){filesOpen.add(fid);if(lastItems[fid])paintFiles(fid,lastItems[fid]);}
   else filesOpen.delete(fid);
 }
-const ST_ICON={done:'✔',downloading:'↓',queued:'•',error:'✕',stopped:'■'};
+const ST_ICON={done:'✔',downloading:'↓',queued:'•',retrying:'↻',error:'✕',stopped:'■'};
 function paintFiles(fid,it){
   const j=$('#job-'+fid);if(!j)return;
   const files=it.files||{};
   const names=Object.keys(files);
-  let dn=0,dl=0,q=0,er=0;
-  for(const k of names){const s=files[k];if(s==='done')dn++;else if(s==='downloading')dl++;else if(s==='error'||s==='stopped')er++;else q++;}
+  let dn=0,dl=0,q=0,er=0,rt=0;
+  for(const k of names){const s=files[k];if(s==='done')dn++;else if(s==='downloading')dl++;else if(s==='error'||s==='stopped')er++;else if(s==='retrying')rt++;else q++;}
   const sum=j.querySelector('.files-summary');
-  sum.textContent=names.length?`(${dn} done · ${dl} active · ${q} queued${er?` · ${er} failed`:''})`:'';
+  sum.textContent=names.length?`(${dn} done · ${dl+rt} active · ${q} queued${er?` · ${er} failed`:''})`:'';
   if(!filesOpen.has(fid))return;
   const list=j.querySelector('.files-list');
   // sort: active first, then queued, then done, then failed; cap to 400 rows for huge folders
-  const rank={downloading:0,queued:1,done:2,error:3,stopped:3};
+  const rank={downloading:0,retrying:1,queued:2,done:3,error:4,stopped:4};
   const sorted=names.sort((a,b)=>(rank[files[a]]??9)-(rank[files[b]]??9)||a.localeCompare(b));
   const cap=400;
   let html=sorted.slice(0,cap).map(n=>{
@@ -1075,7 +1157,11 @@ function listen(jobId){
     if(d.error){es.close();return;}
     for(const id in d.items)paint(id,d.items[id]);
     $('#totSpeed').textContent=d.finished?'':(d.paused?'paused':fmtSpeed(d.speed));
-    if(d.finished){es.close();es=null;curJob=null;hideJobControls();updateSel();toast('All transfers complete');}
+    if(d.finished){es.close();es=null;retryJob=curJob;curJob=null;hideJobControls();updateSel();
+      const anyFail=Object.values(d.items).some(it=>it.failed>0);
+      if(anyFail)$('#retryAllBtn').style.display='';
+      toast(anyFail?'Done — some files failed, retry available':'All transfers complete');
+    }
   };
   es.onerror=()=>{if(es){es.close();es=null;}};
 }
@@ -1095,8 +1181,32 @@ function paint(id,it){
   else if(it.status==='queued'){cls='scanning';label='queued';}
   else if(it.status!=='scanning'&&it.status!=='partial'){cls='downloading';label='downloading';}
   st.className='job-st st-'+cls;st.textContent=label;
+  const rb=j.querySelector('.retry-btn');
+  if(rb)rb.style.display=(it.failed>0)?'':'none';
   if(it.errors&&it.errors.length){const e=j.querySelector('.errs');e.style.display='';e.innerHTML=it.errors.slice(-5).map(x=>esc(x)).join('<br>');}
   paintFiles(id,it);
+}
+async function retryFolder(fid){
+  const job=curJob||retryJob;
+  if(!job){toast('Session ended — re-download to retry');return;}
+  const r=await fetch('/api/retry/'+job,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fid})});
+  const d=await r.json();
+  if(!r.ok){toast(d.error||'retry failed');return;}
+  if(d.requeued===0){toast('Nothing to retry');return;}
+  curJob=job;$('#retryAllBtn').style.display='none';
+  toast('Retrying '+d.requeued+' file(s)');
+  showJobControls();listen(job);
+}
+async function retryAll(){
+  const job=curJob||retryJob;
+  if(!job){toast('Session ended — re-download to retry');return;}
+  const r=await fetch('/api/retry/'+job,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+  const d=await r.json();
+  if(!r.ok){toast(d.error||'retry failed');return;}
+  if(d.requeued===0){toast('Nothing to retry');return;}
+  curJob=job;$('#retryAllBtn').style.display='none';
+  toast('Retrying '+d.requeued+' file(s)');
+  showJobControls();listen(job);
 }
 async function stopJob(){if(!curJob)return;await fetch('/api/stop/'+curJob,{method:'POST'});toast('Stopping…');}
 function esc(s){return (s+'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
