@@ -1,5 +1,5 @@
 from flask import Flask, request, render_template_string, send_from_directory, send_file, jsonify
-import os, zipfile, io, datetime, json, uuid
+import os, zipfile, io, datetime, json, uuid, threading, webbrowser
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
@@ -352,7 +352,7 @@ body::after{
 .cmd-right-title{font-size:0.78rem;font-weight:600;color:var(--text);flex:1;min-width:0;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .cmd-right-meta{font-size:0.6rem;color:var(--muted);white-space:nowrap;}
-.cmd-right-body{flex:1;overflow:auto;padding:1.2rem 1.5rem;display:flex;flex-direction:column;gap:0.8rem;}
+.cmd-right-body{flex:1;min-height:0;overflow:auto;padding:1.2rem 1.5rem;display:flex;flex-direction:column;gap:0.8rem;}
 .cmd-placeholder{
   flex:1;display:flex;align-items:center;justify-content:center;
   flex-direction:column;gap:0.7rem;color:var(--muted2);font-size:0.7rem;
@@ -361,7 +361,7 @@ body::after{
 .cmd-placeholder-ico{font-size:2.5rem;opacity:0.3;}
 .cmd-code-wrap{
   background:var(--s1);border:1px solid var(--border);border-radius:4px;
-  overflow:hidden;flex:1;display:flex;flex-direction:column;
+  overflow:hidden;flex:1;min-height:0;display:flex;flex-direction:column;
 }
 .cmd-code-topbar{
   display:flex;align-items:center;gap:0.5rem;padding:0.5rem 0.9rem;
@@ -977,27 +977,41 @@ function cmdShowDetail(id) {
   copyBtn.className = 'cmd-copy-btn';
   copyBtn.textContent = '⎘ Copy';
   copyBtn.onclick = () => {
-    // Use clipboard API with raw .cmd string — exact char transfer
-    navigator.clipboard.writeText(item.cmd).then(() => {
+    const markCopied = () => {
       copyBtn.textContent = '✓ Copied!';
       copyBtn.classList.add('copied');
       setTimeout(() => {
         copyBtn.textContent = '⎘ Copy';
         copyBtn.classList.remove('copied');
       }, 2000);
-    }).catch(() => {
-      // Fallback: select text in a hidden textarea
+    };
+    const fallbackCopy = () => {
+      // Fallback: select text in a hidden textarea (works over plain HTTP)
       const tmp = document.createElement('textarea');
       tmp.style.position = 'fixed';
+      tmp.style.top = '0';
+      tmp.style.left = '0';
       tmp.style.opacity  = '0';
       tmp.value = item.cmd;  // direct .value assignment
       document.body.appendChild(tmp);
+      tmp.focus();
       tmp.select();
-      document.execCommand('copy');
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
       document.body.removeChild(tmp);
-      copyBtn.textContent = '✓ Copied!';
-      setTimeout(() => copyBtn.textContent = '⎘ Copy', 2000);
-    });
+      if (ok) { markCopied(); }
+      else {
+        copyBtn.textContent = '✗ Copy failed';
+        setTimeout(() => copyBtn.textContent = '⎘ Copy', 2000);
+      }
+    };
+    // navigator.clipboard only exists in secure contexts (HTTPS / localhost).
+    // Over plain HTTP via IP it is undefined, so guard before calling it.
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(item.cmd).then(markCopied).catch(fallbackCopy);
+    } else {
+      fallbackCopy();
+    }
   };
 
   topbar.appendChild(lang);
@@ -1299,5 +1313,13 @@ def cmd_delete(cmd_id):
     save_commands(new)
     return jsonify({'deleted': cmd_id})
 
+def _open_browser():
+    webbrowser.open('http://127.0.0.1:5000')
+
 if __name__ == '__main__':
+    # Auto-launch the default browser when the program starts.
+    # Guarded against Flask's debug reloader (which re-execs this script in a
+    # child process) so we don't pop two tabs — only the real run opens one.
+    if not os.environ.get('WERKZEUG_RUN_MAIN'):
+        threading.Timer(1.0, _open_browser).start()
     app.run(host='0.0.0.0', port=5000, debug=True)
