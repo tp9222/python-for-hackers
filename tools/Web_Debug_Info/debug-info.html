@@ -1,0 +1,1170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Debug Information</title>
+
+<style>
+:root{
+    --bg:#0d1117;
+    --panel:#161b22;
+    --panel2:#0f141b;
+    --border:#30363d;
+    --text:#e6edf3;
+    --muted:#8b949e;
+    --accent:#58a6ff;
+    --green:#3fb950;
+    --red:#f85149;
+    --yellow:#d29922;
+    --button:#21262d;
+    --button-hover:#30363d;
+    --code-bg:#080c12;
+    --code-text:#dbe4ee;
+}
+
+.light{
+    --bg:#f5f7fa;
+    --panel:#ffffff;
+    --panel2:#f8fafc;
+    --border:#d0d7de;
+    --text:#1f2328;
+    --muted:#656d76;
+    --accent:#0969da;
+    --green:#1a7f37;
+    --red:#cf222e;
+    --yellow:#9a6700;
+    --button:#f6f8fa;
+    --button-hover:#eaeef2;
+    --code-bg:#f6f8fa;
+    --code-text:#24292f;
+}
+
+*{ box-sizing:border-box; }
+
+html{ background:var(--bg); }
+
+body{
+    margin:0;
+    padding:24px;
+    background:var(--bg);
+    color:var(--text);
+    font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+    line-height:1.45;
+}
+
+/* Header */
+.topbar{ max-width:1500px; margin:0 auto 22px; }
+
+.title-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:15px;
+    margin-bottom:16px;
+}
+
+.title{ font-size:28px; font-weight:600; }
+
+.subtitle{ color:var(--muted); font-size:13px; margin-top:3px; }
+
+.actions{ display:flex; gap:8px; flex-wrap:wrap; }
+
+button{
+    border:1px solid var(--border);
+    background:var(--button);
+    color:var(--text);
+    padding:8px 12px;
+    border-radius:6px;
+    cursor:pointer;
+    font-size:13px;
+}
+
+button:hover{ background:var(--button-hover); }
+
+button:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
+
+.primary{ background:var(--accent); color:white; border-color:var(--accent); }
+.primary:hover{ opacity:.9; background:var(--accent); }
+
+.search{
+    width:100%;
+    padding:11px 13px;
+    border-radius:7px;
+    border:1px solid var(--border);
+    background:var(--panel);
+    color:var(--text);
+    outline:none;
+    font-size:14px;
+}
+.search:focus{ border-color:var(--accent); }
+
+/* Main */
+#app{ max-width:1500px; margin:auto; }
+
+.section{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:9px;
+    margin-bottom:16px;
+    overflow:hidden;
+}
+.section.hidden{ display:none; }
+.section.collapsed .section-body{ display:none; }
+
+.empty-note{ color:var(--muted); }
+
+.section-header{
+    min-height:52px;
+    padding:13px 16px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    background:var(--panel2);
+    border-bottom:1px solid var(--border);
+    cursor:pointer;
+    user-select:none;
+}
+.section.collapsed .section-header{ border-bottom:none; }
+
+.header-left{ display:flex; align-items:center; gap:9px; min-width:0; }
+
+.caret{
+    color:var(--muted);
+    font-size:11px;
+    transition:transform .15s ease;
+    display:inline-block;
+    flex-shrink:0;
+}
+.section.collapsed .caret{ transform:rotate(-90deg); }
+
+.section-title{ font-size:16px; font-weight:600; }
+.section-count{ color:var(--muted); font-size:12px; margin-left:7px; }
+.section-body{ padding:16px; }
+
+/* Property table */
+.info-grid{
+    display:grid;
+    grid-template-columns:minmax(150px, 220px) minmax(0, 1fr);
+    border:1px solid var(--border);
+    border-radius:6px;
+    overflow:hidden;
+}
+.info-name,.info-value{ padding:10px 12px; border-bottom:1px solid var(--border); }
+.info-name{ background:var(--panel2); font-weight:500; color:var(--muted); }
+.info-value{ min-width:0; overflow-wrap:anywhere; word-break:break-word; }
+.info-grid > :nth-last-child(-n+2){ border-bottom:none; }
+
+/* Long values */
+.value-box{ display:flex; align-items:flex-start; gap:10px; min-width:0; }
+.value-content{ flex:1; min-width:0; overflow-wrap:anywhere; word-break:break-word; }
+.copy-btn{ flex-shrink:0; padding:4px 8px; font-size:11px; }
+
+/* Code / text blocks */
+.code-block{
+    background:var(--code-bg);
+    border:1px solid var(--border);
+    border-radius:7px;
+    padding:13px;
+    color:var(--code-text);
+    font-family:"SFMono-Regular",Consolas,"Liberation Mono",monospace;
+    font-size:12px;
+    line-height:1.6;
+    white-space:pre-wrap;
+    overflow:auto;
+    max-height:500px;
+    overflow-wrap:anywhere;
+    word-break:break-word;
+}
+
+/* Resource items */
+.resource-list{ display:flex; flex-direction:column; gap:8px; }
+.resource-item{
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    padding:10px;
+    border:1px solid var(--border);
+    border-radius:6px;
+    background:var(--panel2);
+}
+.resource-number{ color:var(--muted); min-width:30px; font-size:12px; padding-top:2px; }
+.resource-url{
+    flex:1; min-width:0;
+    font-family:Consolas,monospace;
+    font-size:12px; line-height:1.5;
+    overflow-wrap:anywhere; word-break:break-word;
+}
+
+/* Headers */
+.header-row{
+    display:grid;
+    grid-template-columns:minmax(180px,260px) minmax(0,1fr);
+    border:1px solid var(--border);
+    border-bottom:none;
+}
+.header-row:last-child{ border-bottom:1px solid var(--border); }
+.header-name{
+    padding:9px 11px;
+    background:var(--panel2);
+    color:var(--muted);
+    border-right:1px solid var(--border);
+    overflow-wrap:anywhere;
+}
+.header-value{ padding:9px 11px; min-width:0; overflow-wrap:anywhere; word-break:break-word; }
+
+/* Status */
+.status{
+    display:inline-flex; align-items:center; gap:6px;
+    padding:3px 8px; border-radius:20px;
+    font-size:12px; font-weight:500;
+}
+.status.ok{ color:var(--green); }
+.status.bad{ color:var(--red); }
+.status.unknown{ color:var(--yellow); }
+
+/* Findings */
+.finding{
+    display:flex; align-items:flex-start; gap:9px;
+    padding:9px 11px;
+    border:1px solid var(--border);
+    border-radius:6px;
+    margin-bottom:8px;
+    background:var(--panel2);
+    font-size:13px;
+}
+.finding:last-child{ margin-bottom:0; }
+.finding .dot{ font-size:11px; padding-top:2px; }
+.finding.bad .dot{ color:var(--red); }
+.finding.unknown .dot{ color:var(--yellow); }
+.finding.ok .dot{ color:var(--green); }
+
+/* Technology cards */
+.tech-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:10px; }
+.tech-card{ padding:14px; border:1px solid var(--border); border-radius:7px; background:var(--panel2); }
+.tech-label{ color:var(--muted); font-size:12px; margin-bottom:5px; }
+.tech-value{ font-size:15px; font-weight:600; overflow-wrap:anywhere; }
+
+/* Sub-heading inside a section */
+.sub-head{ font-weight:600; color:var(--muted); font-size:13px; margin:2px 0 8px; }
+.sub-gap{ height:14px; }
+
+/* Forms */
+.form-card{ border:1px solid var(--border); border-radius:7px; margin-bottom:12px; overflow:hidden; }
+.form-title{ padding:10px 12px; background:var(--panel2); font-weight:600; }
+.form-meta{ padding:10px 12px; border-bottom:1px solid var(--border); font-size:13px; }
+.field{ display:grid; grid-template-columns:180px 120px minmax(0,1fr) 60px; border-bottom:1px solid var(--border); }
+.field:last-child{ border-bottom:none; }
+.field > div{ padding:8px 10px; min-width:0; overflow-wrap:anywhere; word-break:break-word; }
+.field-head{ background:var(--panel2); color:var(--muted); font-size:12px; }
+
+/* Comments */
+.comment{ margin-bottom:10px; border:1px solid var(--border); border-radius:7px; overflow:hidden; }
+.comment-header{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:8px 10px; background:var(--panel2); color:var(--muted); font-size:12px;
+}
+.comment-content{
+    padding:12px;
+    font-family:Consolas,monospace; font-size:12px;
+    white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word;
+    max-height:300px; overflow:auto;
+}
+
+.badge{ font-size:10px; padding:1px 6px; border-radius:10px; border:1px solid var(--border); color:var(--muted); }
+
+/* Toast */
+#toast{
+    position:fixed; bottom:20px; right:20px;
+    background:var(--green); color:#fff;
+    padding:10px 15px; border-radius:6px;
+    font-size:13px; z-index:9999;
+    box-shadow:0 5px 20px rgba(0,0,0,.4);
+}
+#toast.error{ background:var(--red); }
+
+/* Mobile */
+@media(max-width:700px){
+    body{ padding:12px; }
+    .title-row{ align-items:flex-start; flex-direction:column; }
+    .info-grid{ grid-template-columns:1fr; }
+    .info-name{ border-right:none; }
+    .header-row{ grid-template-columns:1fr; }
+    .header-name{ border-right:none; border-bottom:1px solid var(--border); }
+    .field{ grid-template-columns:1fr; }
+    .field-head{ display:none; }
+}
+</style>
+</head>
+
+<body>
+
+<div class="topbar">
+    <div class="title-row">
+        <div>
+            <div class="title">Debug Information</div>
+            <div class="subtitle" id="subtitle">Runtime and browser information</div>
+        </div>
+        <div class="actions">
+            <button class="primary" id="btn-copy-all">Copy All</button>
+            <button id="btn-export">Export JSON</button>
+            <button id="btn-collapse">Collapse All</button>
+            <button id="btn-theme">Theme</button>
+        </div>
+    </div>
+    <input id="search" class="search" placeholder="Search information..." autocomplete="off">
+</div>
+
+<div id="app"></div>
+
+<script>
+"use strict";
+
+const DATA = {};
+const SECTIONS = {};   // id -> plain-text copy payload
+const COPY = [];       // index -> value string (referenced by data-copy)
+const SELF_SCRIPT = document.currentScript;  // this tool's own <script>, excluded from page scans
+
+/* ---------- Utility ---------- */
+
+function esc(value){
+    return String(value ?? "").replace(/[&<>"']/g, c => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+    }[c]));
+}
+
+function safe(fn, fallback=""){
+    try{ return fn(); }catch(_){ return fallback; }
+}
+
+// Register a value and return the button attribute. Page data is never
+// interpolated into an executable attribute — only an integer index is.
+function copyAttr(value){
+    const index = COPY.push(String(value ?? "")) - 1;
+    return `data-copy="${index}"`;
+}
+
+async function copyText(value){
+    const text = String(value ?? "");
+    if(navigator.clipboard && window.isSecureContext){
+        try{ await navigator.clipboard.writeText(text); showToast("Copied"); return; }
+        catch(_){ /* fall through */ }
+    }
+    try{
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0;";
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand("copy");
+        ta.remove();
+        showToast(ok ? "Copied" : "Copy failed", !ok);
+    }catch(_){ showToast("Copy failed", true); }
+}
+
+let toastTimer = null;
+function showToast(message, isError=false){
+    const old = document.getElementById("toast");
+    if(old) old.remove();
+    if(toastTimer) clearTimeout(toastTimer);
+    const toast = document.createElement("div");
+    toast.id = "toast";
+    if(isError) toast.className = "error";
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    toastTimer = setTimeout(() => toast.remove(), 1500);
+}
+
+function uniq(list){ return [...new Set(list)]; }
+
+/* ---------- Section shell ---------- */
+
+function section(title, id, content, count=""){
+    SECTIONS[id] = content.plain || "";
+    const html = `
+        <section class="section" data-section="${esc(id)}">
+            <div class="section-header" role="button" tabindex="0" aria-expanded="true">
+                <div class="header-left">
+                    <span class="caret">&#9662;</span>
+                    <span class="section-title">${esc(title)}</span>
+                    ${count !== "" ? `<span class="section-count">${esc(count)}</span>` : ""}
+                </div>
+                <button data-copy-section="${esc(id)}">Copy</button>
+            </div>
+            <div class="section-body">${content.html}</div>
+        </section>
+    `;
+    document.getElementById("app").insertAdjacentHTML("beforeend", html);
+}
+
+/* ---------- Renderers ---------- */
+
+function infoGrid(object){
+    let html = `<div class="info-grid">`;
+    let plain = "";
+    Object.entries(object).forEach(([key, value]) => {
+        const v = String(value ?? "");
+        plain += `${key}: ${v}\n`;
+        html += `
+            <div class="info-name">${esc(key)}</div>
+            <div class="info-value">
+                <div class="value-box">
+                    <div class="value-content">${esc(v)}</div>
+                    <button class="copy-btn" ${copyAttr(v)}>Copy</button>
+                </div>
+            </div>`;
+    });
+    html += `</div>`;
+    return { html, plain };
+}
+
+function resourceSection(title, items, id, count){
+    if(!items.length){
+        section(title, id, {
+            html:`<span class="empty-note">None found</span>`, plain:"None found"
+        }, "0");
+        return;
+    }
+    let html = `<div class="resource-list">`;
+    let plain = "";
+    items.forEach((item, i) => {
+        plain += `${i+1}. ${item}\n`;
+        html += `
+            <div class="resource-item">
+                <div class="resource-number">${i+1}</div>
+                <div class="resource-url">${esc(item)}</div>
+                <button class="copy-btn" ${copyAttr(item)}>Copy</button>
+            </div>`;
+    });
+    html += `</div>`;
+    section(title, id, { html, plain }, count != null ? count : String(items.length));
+}
+
+/* ---------- Technology (server-side) ---------- */
+
+function detectTechnology(headers){
+    const server  = String(headers.server || "").toLowerCase();
+    const powered = String(headers["x-powered-by"] || "").toLowerCase();
+    if(powered.includes("php"))       return "PHP";
+    if(powered.includes("asp.net"))   return "ASP.NET";
+    if(powered.includes("express"))   return "Node.js / Express";
+    if(powered.includes("next"))      return "Next.js";
+    if(server.includes("iis"))        return "Microsoft IIS";
+    if(server.includes("apache"))     return "Apache";
+    if(server.includes("nginx"))      return "Nginx";
+    if(server.includes("caddy"))      return "Caddy";
+    if(server.includes("cloudflare")) return "Cloudflare";
+    if(server.includes("tomcat"))     return "Java / Tomcat";
+    if(server.includes("jetty"))      return "Java / Jetty";
+    if(server.includes("gunicorn"))   return "Python / Gunicorn";
+    if(server.includes("uwsgi"))      return "Python / uWSGI";
+    if(server.includes("openresty"))  return "OpenResty";
+    return "Unknown";
+}
+
+function headerSection(headers){
+    const entries = Object.entries(headers);
+    let html = "", plain = "";
+    entries.forEach(([name, value]) => {
+        plain += `${name}: ${value}\n`;
+        html += `
+            <div class="header-row">
+                <div class="header-name">${esc(name)}</div>
+                <div class="header-value">
+                    <div class="value-box">
+                        <div class="value-content">${esc(value)}</div>
+                        <button class="copy-btn" ${copyAttr(value)}>Copy</button>
+                    </div>
+                </div>
+            </div>`;
+    });
+    section("Response Headers", "headers", { html, plain }, `${entries.length} headers`);
+}
+
+function securityHeaders(headers){
+    const checks = [
+        "strict-transport-security","content-security-policy","x-frame-options",
+        "x-content-type-options","referrer-policy","permissions-policy",
+        "cross-origin-opener-policy","cross-origin-resource-policy"
+    ];
+    let html = `<div class="info-grid">`, plain = "", present = 0;
+    checks.forEach(name => {
+        const value = headers[name];
+        if(value) present++;
+        plain += `${name}: ${value || "Missing"}\n`;
+        html += `
+            <div class="info-name">${esc(name)}</div>
+            <div class="info-value">
+                ${value
+                    ? `<span class="status ok">&#9679; Present</span>
+                       <div style="margin-top:5px">${esc(value)}</div>`
+                    : `<span class="status bad">&#9679; Missing</span>`}
+            </div>`;
+    });
+    html += `</div>`;
+    section("Security Headers", "security", { html, plain }, `${present}/${checks.length} present`);
+}
+
+/* ---------- Client / capabilities ---------- */
+
+function collectClient(){
+    return {
+        URL:location.href, Origin:location.origin, Host:location.host,
+        Path:location.pathname, Protocol:location.protocol,
+        Referrer:document.referrer || "(none)",
+        SecureContext:window.isSecureContext,
+        Browser:navigator.userAgent,
+        Platform:safe(() => navigator.platform, "Unknown"),
+        Language:navigator.language,
+        Languages:safe(() => (navigator.languages || []).join(", ")),
+        Timezone:safe(() => Intl.DateTimeFormat().resolvedOptions().timeZone),
+        Screen:`${screen.width} × ${screen.height}`,
+        Viewport:`${window.innerWidth} × ${window.innerHeight}`,
+        DevicePixelRatio:window.devicePixelRatio,
+        CPUCores:safe(() => navigator.hardwareConcurrency, "Unknown"),
+        DeviceMemoryGB:safe(() => navigator.deviceMemory, "Unknown"),
+        Online:navigator.onLine,
+        DoNotTrack:navigator.doNotTrack || "(unset)",
+        CookiesEnabled:navigator.cookieEnabled,
+        LocalStorageKeys:safe(() => localStorage.length, "n/a"),
+        SessionStorageKeys:safe(() => sessionStorage.length, "n/a")
+    };
+}
+
+function capabilitiesSection(){
+    const obj = {};
+    try{
+        const c = document.createElement("canvas");
+        const gl = c.getContext("webgl") || c.getContext("experimental-webgl");
+        if(gl){
+            const dbg = gl.getExtension("WEBGL_debug_renderer_info");
+            obj["GPU Vendor"]   = dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : "hidden";
+            obj["GPU Renderer"] = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : "hidden";
+        } else { obj["WebGL"] = "unavailable"; }
+    }catch(_){ obj["WebGL"] = "error"; }
+    obj["Max Touch Points"] = navigator.maxTouchPoints;
+    obj["Plugins"] = safe(() => navigator.plugins.length, 0);
+    const conn = navigator.connection;
+    if(conn){
+        obj["Network Type"] = conn.effectiveType || "?";
+        obj["Downlink"] = (conn.downlink ?? "?") + " Mbps";
+        obj["RTT"] = (conn.rtt ?? "?") + " ms";
+    }
+    obj["Service Worker API"] = "serviceWorker" in navigator;
+    obj["WebRTC"] = !!window.RTCPeerConnection;
+    obj["WebAssembly"] = typeof WebAssembly === "object";
+    obj["Notifications"] = "Notification" in window ? Notification.permission : "unsupported";
+    obj["Battery API"] = "getBattery" in navigator;
+    DATA.capabilities = obj;
+    section("Browser Capabilities", "capabilities", infoGrid(obj));
+}
+
+/* ---------- Client-side framework detection ---------- */
+
+function frameworksSection(){
+    const w = window, found = [];
+    const add = (label, cond, version) => {
+        if(cond) found.push(version ? `${label} ${version}` : label);
+    };
+    add("React", w.React || document.querySelector("[data-reactroot]") || w.__NEXT_DATA__,
+        safe(() => w.React && w.React.version));
+    add("Next.js", w.__NEXT_DATA__ || document.querySelector("#__next"));
+    add("Vue.js", w.Vue || w.__VUE__ || document.querySelector("[data-v-app]"),
+        safe(() => w.Vue && w.Vue.version));
+    add("Nuxt", w.__NUXT__ || document.querySelector("#__nuxt"));
+    add("Angular", w.ng || w.angular || document.querySelector("[ng-version]"),
+        safe(() => { const e = document.querySelector("[ng-version]"); return e && e.getAttribute("ng-version"); }));
+    add("Svelte", document.querySelector("[class*='svelte-']"));
+    add("jQuery", w.jQuery || (w.$ && w.$.fn && w.$.fn.jquery),
+        safe(() => w.jQuery && w.jQuery.fn && w.jQuery.fn.jquery));
+    add("Ember", w.Ember);
+    add("Backbone", w.Backbone);
+    add("Bootstrap", document.querySelector("[data-bs-toggle],[data-toggle]"));
+    add("Google Analytics", w.ga || w.gtag);
+    add("Google Tag Manager", w.google_tag_manager || w.dataLayer);
+    add("WordPress",
+        document.querySelector('meta[name="generator"][content*="WordPress" i]') ||
+        document.querySelector('link[href*="wp-content"],script[src*="wp-includes"]'));
+    add("Shopify", w.Shopify);
+    add("Cloudflare (client)", document.querySelector('script[src*="cloudflare"]'));
+    add("Salesforce Commerce Cloud",
+        w.dw || w.Demandware || w.dwAnalytics ||
+        /\/on\/demandware\.(?:store|static)\//i.test(location.href) ||
+        /demandware\.(?:net|static|edgesuite)/i.test(document.documentElement.innerHTML) ||
+        /(?:^|;\s*)dw(?:sid|anonymous|ac|secure)/i.test(safe(() => document.cookie, "")));
+
+    DATA.frameworks = found;
+    if(!found.length){ resourceSection("Detected Frameworks & Libraries", [], "frameworks"); return; }
+    const html = `<div class="tech-grid">` + found.map(f =>
+        `<div class="tech-card"><div class="tech-label">Detected</div><div class="tech-value">${esc(f)}</div></div>`
+    ).join("") + `</div>`;
+    section("Detected Frameworks & Libraries", "frameworks", { html, plain:found.join("\n") }, String(found.length));
+}
+
+/* ---------- Performance timing ---------- */
+
+function performanceSection(){
+    const nav = safe(() => performance.getEntriesByType("navigation")[0], null);
+    const obj = {};
+    if(nav){
+        const ms = n => (n > 0 ? Math.round(n) + " ms" : "—");
+        obj["Protocol"] = nav.nextHopProtocol || "unknown";
+        obj["DNS Lookup"] = ms(nav.domainLookupEnd - nav.domainLookupStart);
+        obj["TCP Connect"] = ms(nav.connectEnd - nav.connectStart);
+        obj["TLS Handshake"] = nav.secureConnectionStart ? ms(nav.connectEnd - nav.secureConnectionStart) : "n/a";
+        obj["TTFB (req→resp)"] = ms(nav.responseStart - nav.requestStart);
+        obj["Response Download"] = ms(nav.responseEnd - nav.responseStart);
+        obj["DOM Interactive"] = ms(nav.domInteractive);
+        obj["DOM Content Loaded"] = ms(nav.domContentLoadedEventEnd);
+        obj["Load Complete"] = ms(nav.loadEventEnd);
+        obj["Transfer Size"] = (nav.transferSize || 0) + " bytes";
+    } else {
+        obj["Status"] = "Navigation Timing API unavailable";
+    }
+    DATA.performance = obj;
+    section("Performance Timing", "performance", infoGrid(obj));
+}
+
+/* ---------- Web storage ---------- */
+
+function storageSection(){
+    const dump = store => {
+        const obj = {};
+        try{ for(let i=0;i<store.length;i++){ const k = store.key(i); obj[k] = store.getItem(k); } }catch(_){}
+        return obj;
+    };
+    const local = dump(localStorage), sess = dump(sessionStorage);
+    DATA.storage = { local, session:sess };
+
+    let html = "", plain = "";
+    [["localStorage", local], ["sessionStorage", sess]].forEach(([label, obj]) => {
+        const keys = Object.keys(obj);
+        html += `<div class="sub-head">${label} — ${keys.length}</div>`;
+        if(!keys.length){
+            html += `<div class="empty-note sub-gap">Empty</div>`;
+            plain += `${label}: (empty)\n`;
+        } else {
+            html += infoGrid(obj).html + `<div class="sub-gap"></div>`;
+            Object.entries(obj).forEach(([k, v]) => { plain += `${label}.${k} = ${v}\n`; });
+        }
+    });
+    const total = Object.keys(local).length + Object.keys(sess).length;
+    section("Web Storage", "storage", { html, plain }, `${total} keys`);
+}
+
+/* ---------- Forms ---------- */
+
+function formsSection(){
+    const forms = [...document.forms];
+    let html = "", plain = "";
+    forms.forEach((form, index) => {
+        const method = (form.method || "GET").toUpperCase();
+        html += `
+            <div class="form-card">
+                <div class="form-title">Form ${index+1}</div>
+                <div class="form-meta">
+                    <b>Action:</b> ${esc(form.action)}<br>
+                    <b>Method:</b> ${esc(method)}
+                </div>
+                <div class="field field-head">
+                    <div>Name</div><div>Type</div><div>Value</div><div></div>
+                </div>`;
+        plain += `Form ${index+1}\nAction: ${form.action}\nMethod: ${method}\n`;
+        [...form.elements].forEach(el => {
+            const value = el.type === "hidden" ? el.value : "";
+            plain += `${el.name} (${el.type}): ${value}\n`;
+            html += `
+                <div class="field">
+                    <div>${esc(el.name || "")}</div>
+                    <div>${esc(el.type || "")}</div>
+                    <div>${esc(value)}</div>
+                    <div><button class="copy-btn" ${copyAttr(value)}>Copy</button></div>
+                </div>`;
+        });
+        html += `</div>`;
+    });
+    if(!forms.length){
+        html = `<span class="empty-note">No forms detected.</span>`;
+        plain = "No forms detected.";
+    }
+    section("Forms & Hidden Fields", "forms", { html, plain }, `${forms.length} forms`);
+}
+
+/* ---------- Meta tags ---------- */
+
+function metaSection(){
+    const metas = [...document.querySelectorAll("meta")].map(m => {
+        const name = m.getAttribute("name") || m.getAttribute("property")
+            || m.getAttribute("http-equiv") || (m.hasAttribute("charset") ? "charset" : "");
+        const content = m.getAttribute("content") || m.getAttribute("charset") || "";
+        return name ? { name, content } : null;
+    }).filter(Boolean);
+    if(!metas.length){
+        section("Meta Tags", "meta", { html:`<span class="empty-note">None found</span>`, plain:"None found" }, "0");
+        return;
+    }
+    const obj = {};
+    metas.forEach(m => { obj[m.name] = m.content; });
+    DATA.meta = obj;
+    section("Meta Tags", "meta", infoGrid(obj), String(metas.length));
+}
+
+/* ---------- Links ---------- */
+
+function linksSection(){
+    const seen = new Set();
+    const items = [];
+    let internal = 0, external = 0;
+    [...document.querySelectorAll("a[href]")].forEach(a => {
+        const href = a.href;
+        if(!href || href.startsWith("javascript:") || seen.has(href)) return;
+        seen.add(href);
+        let ext = false;
+        try{ ext = new URL(href).origin !== location.origin; }catch(_){}
+        if(/^https?:/i.test(href)){ ext ? external++ : internal++; }
+        items.push({ href, ext });
+    });
+    DATA.links = items.map(i => i.href);
+    if(!items.length){ resourceSection("Links", [], "links"); return; }
+    let html = `<div class="resource-list">`, plain = "";
+    items.forEach((it, i) => {
+        plain += `${i+1}. ${it.href}${it.ext ? " [external]" : ""}\n`;
+        html += `
+            <div class="resource-item">
+                <div class="resource-number">${i+1}</div>
+                <div class="resource-url">${esc(it.href)} ${it.ext ? '<span class="badge">external</span>' : ''}</div>
+                <button class="copy-btn" ${copyAttr(it.href)}>Copy</button>
+            </div>`;
+    });
+    html += `</div>`;
+    section("Links", "links", { html, plain }, `${internal} internal / ${external} external`);
+}
+
+/* ---------- Collectors for simple resource lists ---------- */
+
+function collectURLs(){
+    const found = new Set();
+    document.querySelectorAll("[href],[src],[action]").forEach(el => {
+        ["href","src","action"].forEach(attr => {
+            const raw = el.getAttribute && el.getAttribute(attr);
+            if(raw && /^https?:\/\//i.test(raw)) found.add(raw);
+        });
+    });
+    (document.documentElement.innerHTML.match(/\bhttps?:\/\/[^\s"'<>()]+/gi) || [])
+        .forEach(u => found.add(u));
+    return [...found].sort();
+}
+
+function collectEndpoints(){
+    const scriptText = [...document.querySelectorAll("script:not([src])")]
+        .filter(s => s !== SELF_SCRIPT)
+        .map(s => s.textContent).join("\n");
+    const set = new Set();
+    (scriptText.match(/["'`](\/[a-zA-Z0-9_\-./]{2,})["'`]/g) || []).forEach(m => {
+        const p = m.slice(1, -1);
+        if(!p.startsWith("//")) set.add(p);
+    });
+    (scriptText.match(/\/(?:api|v\d+|graphql|rest|auth|oauth|login|logout|admin|user|account)[a-zA-Z0-9_\-./]*/gi) || [])
+        .forEach(m => set.add(m));
+    // SFCC / Demandware endpoints (OCAPI, SCAPI, storefront controllers)
+    (scriptText.match(/\/(?:on\/demandware\.(?:store|static)|dw\/(?:shop|data|meta)|s\/[^/'"]+\/dw)[a-zA-Z0-9_\-./]*/gi) || [])
+        .forEach(m => set.add(m));
+    return [...set].sort();
+}
+
+function collectEmails(){
+    const text = document.documentElement.innerHTML;
+    return uniq(text.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || [])
+        .filter(e => !/\.(png|jpe?g|gif|svg|webp|css|js)$/i.test(e));
+}
+
+function collectComments(){
+    const out = [];
+    const iter = document.createNodeIterator(document.documentElement, NodeFilter.SHOW_COMMENT);
+    let node;
+    while((node = iter.nextNode())){
+        const text = (node.nodeValue || "").trim();
+        if(text) out.push(text);
+    }
+    return out;
+}
+
+/* ---------- Service workers ---------- */
+
+async function serviceWorkerSection(){
+    let items = [];
+    try{
+        if(navigator.serviceWorker && navigator.serviceWorker.getRegistrations){
+            const regs = await navigator.serviceWorker.getRegistrations();
+            items = regs.map(r => (r.active && r.active.scriptURL) || r.scope);
+        }
+    }catch(_){}
+    DATA.serviceWorkers = items;
+    resourceSection("Service Workers", items, "serviceworkers");
+}
+
+/* ---------- Comments section ---------- */
+
+function commentsSection(comments){
+    if(!comments.length){
+        section("HTML Comments", "comments", {
+            html:`<span class="empty-note">No comments found.</span>`, plain:"No comments found."
+        }, "0");
+        return;
+    }
+    let html = "", plain = "";
+    comments.forEach((comment, i) => {
+        plain += `Comment ${i+1}\n${comment}\n\n`;
+        html += `
+            <div class="comment">
+                <div class="comment-header">
+                    <span>Comment ${i+1}</span>
+                    <button class="copy-btn" ${copyAttr(comment)}>Copy</button>
+                </div>
+                <div class="comment-content">${esc(comment)}</div>
+            </div>`;
+    });
+    section("HTML Comments", "comments", { html, plain }, `${comments.length} comments`);
+}
+
+/* ---------- Heuristic findings (security-relevant) ---------- */
+
+function findingsSection(headers, comments){
+    const findings = [];
+    const add = (level, text) => findings.push({ level, text });
+    const https = location.protocol === "https:";
+    const local = ["localhost","127.0.0.1","[::1]"].includes(location.hostname)
+        || location.protocol === "file:";
+
+    // Mixed content (subresources only)
+    if(https){
+        const subres = [...document.querySelectorAll(
+            'img[src],script[src],iframe[src],source[src],audio[src],video[src],link[rel="stylesheet"][href]'
+        )].map(e => e.getAttribute("src") || e.getAttribute("href"))
+          .filter(u => u && u.toLowerCase().startsWith("http://"));
+        if(subres.length) add("bad", `Mixed content: ${subres.length} subresource(s) loaded over http://`);
+    }
+    if(!https && !local) add("bad", "Page served over plaintext HTTP");
+
+    // Password fields
+    document.querySelectorAll('input[type="password"]').forEach(inp => {
+        const form = inp.form;
+        if(!form) return;
+        const rawAction = form.getAttribute("action") || "";
+        if(rawAction.toLowerCase().startsWith("http://"))
+            add("bad", "Password field in a form submitting over http://");
+        try{
+            const o = new URL(form.action, location.href).origin;
+            if(o !== location.origin) add("unknown", `Password form posts cross-origin to ${o}`);
+        }catch(_){}
+    });
+
+    // Sensitive comments
+    const sensitive = /todo|fixme|hack\b|pass(word|wd)?|api[_-]?key|secret|token|bearer|private key|backdoor|credential/i;
+    (comments || []).forEach(c => {
+        if(sensitive.test(c)) add("unknown", `Comment flagged: "${c.slice(0, 120)}${c.length > 120 ? "…" : ""}"`);
+    });
+
+    // Header hygiene (only when we actually read them)
+    if(headers){
+        if(!headers["content-security-policy"]) add("unknown", "No Content-Security-Policy header");
+        if(https && !headers["strict-transport-security"]) add("unknown", "No Strict-Transport-Security (HSTS) header");
+        if(!headers["x-frame-options"] && !String(headers["content-security-policy"] || "").includes("frame-ancestors"))
+            add("unknown", "No clickjacking protection (X-Frame-Options / frame-ancestors)");
+        if(!headers["x-content-type-options"]) add("unknown", "No X-Content-Type-Options: nosniff");
+        if(headers.server) add("unknown", `Server header discloses software: ${headers.server}`);
+        if(headers["x-powered-by"]) add("unknown", `X-Powered-By discloses software: ${headers["x-powered-by"]}`);
+    }
+
+    if(!findings.length) add("ok", "No issues flagged by the built-in heuristics");
+
+    DATA.findings = findings.map(f => `[${f.level}] ${f.text}`);
+    const html = findings.map(f =>
+        `<div class="finding ${f.level}"><span class="dot">&#9679;</span><span>${esc(f.text)}</span></div>`
+    ).join("");
+    const plain = findings.map(f => `- ${f.text}`).join("\n");
+    const flagged = findings.filter(f => f.level !== "ok").length;
+    section("Interesting Findings", "findings", { html, plain }, `${flagged} flagged`);
+}
+
+/* ---------- Salesforce Commerce Cloud (SFCC / Demandware) ---------- */
+
+function detectSFCC(headers){
+    const w = window;
+    const url = location.href;
+    const host = location.hostname;
+    const cookieNames = safe(() => document.cookie, "").split(";")
+        .map(c => c.split("=")[0].trim()).filter(Boolean);
+    // Inline scripts EXCLUDING this tool's own, so its source can't self-match.
+    const otherInline = [...document.querySelectorAll("script:not([src])")]
+        .filter(s => s !== SELF_SCRIPT).map(s => s.textContent).join("\n");
+    const q = sel => { try{ return document.querySelector(sel); }catch(_){ return null; } };
+
+    const signals = [];
+    const info = {};
+
+    // URL / host signatures (read from location, never the tool's own markup)
+    if(/\/on\/demandware\.store\//i.test(url))       signals.push("URL path /on/demandware.store/");
+    if(/demandware\.net/i.test(host))                signals.push("Host on *.demandware.net");
+    if(/commercecloud\.salesforce\.com/i.test(host)) signals.push("Host on *.commercecloud.salesforce.com");
+
+    // Real asset elements (attribute match, not an innerHTML substring → no self-match)
+    if(q('[src*="demandware.static"],[href*="demandware.static"]'))
+        signals.push("Assets under /on/demandware.static/");
+    if(q('[src*="edgesuite.net"],[href*="edgesuite.net"]'))
+        signals.push("Assets on demandware.edgesuite.net (Akamai)");
+
+    // Site ID + locale:  /Sites-<id>-Site/<locale>/  (site IDs are alphanumeric/-/_)
+    const siteMatch = url.match(/Sites-([A-Za-z0-9_\-]+?)-Site(?:\/([a-z]{2}(?:_[A-Z]{2})?))?/);
+    if(siteMatch){
+        info["Site ID"] = siteMatch[1];
+        if(siteMatch[2]) info["Locale"] = siteMatch[2];
+        signals.push(`Site path Sites-${siteMatch[1]}-Site`);
+    }
+
+    // Controller-Action in a demandware URL
+    if(/demandware/i.test(url)){
+        const ctrl = url.match(/\/([A-Z][A-Za-z0-9]+-[A-Za-z0-9]+)(?=[/?]|$)/);
+        if(ctrl) info["Current Controller"] = ctrl[1];
+    }
+
+    // JS globals
+    if(w.dw)              signals.push("window.dw present");
+    if(w.dwAnalytics)     signals.push("window.dwAnalytics present");
+    if(w.Demandware)      signals.push("window.Demandware namespace");
+    if(w.CQuotient)       signals.push("window.CQuotient (Einstein active data)");
+    if(w.SitePreferences){ signals.push("window.SitePreferences"); info["Architecture"] = "SiteGenesis (likely)"; }
+    if(w.pageContext && w.pageContext.ns) info["Page namespace"] = w.pageContext.ns;
+
+    // Architecture guess (SFRA storefronts render <div class="page" data-action ...>)
+    if(!info["Architecture"] &&
+       (/demandware/i.test(url) || q('[src*="demandware"]')) &&
+       q("[data-action][data-querystring], .page[data-action]"))
+        info["Architecture"] = "SFRA (likely)";
+
+    // OCAPI / SCAPI references (scan other scripts, not the tool's own)
+    if(/\/dw\/(?:shop|data|meta)\/v\d+/i.test(otherInline)) signals.push("OCAPI reference (/dw/shop|data)");
+    if(/\/s\/[^/'"]+\/dw\//i.test(otherInline) || /api\.commercecloud\.salesforce\.com/i.test(otherInline))
+        signals.push("SCAPI / Shop API reference");
+
+    // Cookies (best-effort; dwsid/dwsecuretoken are usually HttpOnly and invisible to JS)
+    const dwPrefixes = ["dwsid","dwanonymous_","dwsecuretoken_","dwac_","dwpersonalization_",
+                        "__cq_dnt","dw_dnt","cquid","cqcid"];
+    const dwCookies = cookieNames.filter(n => dwPrefixes.some(p => n === p || n.startsWith(p)));
+    if(dwCookies.length) signals.push("Demandware cookies: " + dwCookies.join(", "));
+
+    // Instance / realm
+    if(/demandware\.net$/i.test(host) || /commercecloud\.salesforce\.com$/i.test(host)){
+        info["Instance Host"] = host;
+        if(/^development[-.]/i.test(host) || /(^|[-.])dev\d*[-.]/i.test(host)) info["Instance Type"] = "Development";
+        else if(/^staging[-.]/i.test(host))    info["Instance Type"] = "Staging";
+        else if(/^production[-.]/i.test(host)) info["Instance Type"] = "Production";
+    }
+
+    // Edge / CDN hints
+    if(headers){
+        const edge = [headers.server, headers.via, headers["x-cache"], headers["x-served-by"]]
+            .map(v => String(v || "")).join(" ").toLowerCase();
+        if(edge.includes("akamai") || headers["x-akamai-transformed"] !== undefined)
+            signals.push("Akamai edge (typical SFCC CDN)");
+    }
+
+    return { detected: signals.length > 0, signals, info };
+}
+
+function sfccSection(headers){
+    const r = detectSFCC(headers);
+    DATA.sfcc = r;
+
+    if(!r.detected){
+        section("Salesforce Commerce Cloud (SFCC)", "sfcc", {
+            html:`<span class="empty-note">Not detected — no SFCC / Demandware signals found on this page.</span>`,
+            plain:"SFCC / Demandware: not detected"
+        }, "not detected");
+        return;
+    }
+
+    let html = "", plain = "SFCC / Demandware detected\n";
+    if(Object.keys(r.info).length){
+        html += infoGrid(r.info).html + `<div class="sub-gap"></div>`;
+        plain += Object.entries(r.info).map(([k, v]) => `${k}: ${v}`).join("\n") + "\n";
+    }
+    html += `<div class="sub-head">Signals matched (${r.signals.length})</div>`;
+    html += `<div class="resource-list">` + r.signals.map(s =>
+        `<div class="resource-item"><div class="resource-url">${esc(s)}</div></div>`).join("") + `</div>`;
+    plain += "Signals:\n" + r.signals.map(s => "- " + s).join("\n");
+
+    section("Salesforce Commerce Cloud (SFCC)", "sfcc", { html, plain },
+        `detected · ${r.signals.length} signals`);
+}
+
+/* ---------- Init ---------- */
+
+async function init(){
+    const comments = collectComments();   // data only; rendered later
+
+    section("Client Information", "client", infoGrid((DATA.client = collectClient())));
+
+    let headers = null;
+    try{
+        const response = await fetch(location.href, { method:"GET", cache:"no-store" });
+        headers = {};
+        response.headers.forEach((value, name) => { headers[name] = value; });
+        DATA.status = response.status;
+        DATA.headers = headers;
+        const technology = {
+            Platform:detectTechnology(headers),
+            HTTPStatus:`${response.status} ${response.statusText}`.trim(),
+            Server:headers.server || "Not disclosed",
+            PoweredBy:headers["x-powered-by"] || "Not disclosed",
+            ContentType:headers["content-type"] || "Not disclosed"
+        };
+        DATA.technology = technology;
+        findingsSection(headers, comments);
+        section("Technology", "technology", infoGrid(technology));
+        headerSection(headers);
+        securityHeaders(headers);
+    }catch(error){
+        findingsSection(null, comments);
+        section("Technology", "technology", {
+            html:`<span class="status bad">Unable to inspect response — ${esc(error.message)}</span>`,
+            plain:`Unable to inspect response: ${error.message}`
+        });
+    }
+
+    sfccSection(headers);
+    frameworksSection();
+    capabilitiesSection();
+    performanceSection();
+    metaSection();
+
+    const cookies = safe(() => document.cookie, "") || "No JavaScript-accessible cookies";
+    DATA.cookies = cookies;
+    section("Cookies", "cookies", { html:`<div class="code-block">${esc(cookies)}</div>`, plain:cookies });
+
+    storageSection();
+    formsSection();
+    linksSection();
+
+    const images = uniq([...document.images].map(i => i.src).filter(Boolean));
+    resourceSection("Images", images, "images");
+
+    const iframes = uniq([...document.querySelectorAll("iframe[src]")].map(f => f.src).filter(Boolean));
+    resourceSection("Iframes", iframes, "iframes");
+
+    const javascript = uniq([...document.scripts].map(s => s.src).filter(Boolean));
+    resourceSection("JavaScript Files", javascript, "javascript");
+
+    const css = uniq([...document.querySelectorAll('link[rel="stylesheet"]')].map(l => l.href).filter(Boolean));
+    resourceSection("CSS Files", css, "css");
+
+    const urls = collectURLs();
+    resourceSection("URLs Found", urls, "urls");
+
+    const endpoints = collectEndpoints();
+    resourceSection("Endpoint Candidates (inline JS)", endpoints, "endpoints");
+
+    const emails = collectEmails();
+    resourceSection("Email Addresses", emails, "emails");
+
+    await serviceWorkerSection();
+
+    commentsSection(comments);
+
+    DATA.resources = { javascript, css, images, iframes, urls, endpoints, emails, comments };
+
+    // Footer summary
+    const count = document.querySelectorAll(".section").length;
+    const sub = document.getElementById("subtitle");
+    if(sub) sub.textContent =
+        `${count} sections · ${location.host || location.protocol} · generated ${new Date().toLocaleString()}`;
+}
+
+/* ---------- Event delegation: copy ---------- */
+
+document.addEventListener("click", e => {
+    const copyBtn = e.target.closest("[data-copy]");
+    if(copyBtn){ copyText(COPY[+copyBtn.dataset.copy]); return; }
+    const sectionBtn = e.target.closest("[data-copy-section]");
+    if(sectionBtn){ copyText(SECTIONS[sectionBtn.dataset.copySection] || ""); }
+});
+
+/* ---------- Collapse / expand ---------- */
+
+function toggleSection(header){
+    const sec = header.closest(".section");
+    const collapsed = sec.classList.toggle("collapsed");
+    header.setAttribute("aria-expanded", String(!collapsed));
+}
+
+document.addEventListener("click", e => {
+    const header = e.target.closest(".section-header");
+    if(!header || e.target.closest("button")) return;
+    toggleSection(header);
+});
+
+document.addEventListener("keydown", e => {
+    if(e.key !== "Enter" && e.key !== " ") return;
+    const header = e.target.closest(".section-header");
+    if(!header) return;
+    e.preventDefault();
+    toggleSection(header);
+});
+
+/* ---------- Search ---------- */
+
+document.getElementById("search").addEventListener("input", function(){
+    const query = this.value.trim().toLowerCase();
+    document.querySelectorAll(".section").forEach(sec => {
+        const matches = sec.innerText.toLowerCase().includes(query);
+        sec.classList.toggle("hidden", query !== "" && !matches);
+    });
+});
+
+/* ---------- Toolbar ---------- */
+
+document.getElementById("btn-copy-all")
+    .addEventListener("click", () => copyText(JSON.stringify(DATA, null, 2)));
+
+document.getElementById("btn-export").addEventListener("click", () => {
+    const blob = new Blob([JSON.stringify(DATA, null, 2)], { type:"application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    link.href = url;
+    link.download = `debug-information-${stamp}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+});
+
+document.getElementById("btn-collapse").addEventListener("click", function(){
+    const sections = [...document.querySelectorAll(".section")];
+    const anyOpen = sections.some(s => !s.classList.contains("collapsed"));
+    sections.forEach(s => {
+        s.classList.toggle("collapsed", anyOpen);
+        const h = s.querySelector(".section-header");
+        if(h) h.setAttribute("aria-expanded", String(!anyOpen));
+    });
+    this.textContent = anyOpen ? "Expand All" : "Collapse All";
+});
+
+document.getElementById("btn-theme").addEventListener("click", () => {
+    const light = document.body.classList.toggle("light");
+    try{ localStorage.setItem("debug-theme", light ? "light" : "dark"); }catch(_){}
+});
+
+/* ---------- Start ---------- */
+
+try{
+    if(localStorage.getItem("debug-theme") === "light") document.body.classList.add("light");
+}catch(_){}
+
+init();
+
+</script>
+
+</body>
+</html>
