@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Debug Info (mini)</title>
+</head>
+<body>
+
+<h1>Debug Info (mini)</h1>
+<div id="out">Loading...</div>
+
+<script>
+// Minimal, no-CSS runtime debug dump. Vanilla JS only (required to read headers,
+// cookies, navigator, DOM). Output is plain semantic HTML.
+
+function esc(v){
+    return String(v ?? "").replace(/[&<>]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;" }[c]));
+}
+function safe(fn, d=""){ try{ return fn(); }catch(_){ return d; } }
+
+// Render an object as "key: value" lines inside a <pre>.
+function pre(obj){
+    const text = Array.isArray(obj)
+        ? obj.map((v,i) => (i+1) + ". " + v).join("\n")
+        : Object.entries(obj).map(([k,v]) => k + ": " + v).join("\n");
+    return "<pre>" + esc(text || "(none)") + "</pre>";
+}
+function block(title, body){ return "<h2>" + esc(title) + "</h2>" + body; }
+
+async function run(){
+    let html = "";
+
+    // Client
+    html += block("Client", pre({
+        URL: location.href,
+        Origin: location.origin,
+        Host: location.host,
+        Protocol: location.protocol,
+        Referrer: document.referrer || "(none)",
+        SecureContext: window.isSecureContext,
+        UserAgent: navigator.userAgent,
+        Platform: safe(() => navigator.platform),
+        Language: navigator.language,
+        Timezone: safe(() => Intl.DateTimeFormat().resolvedOptions().timeZone),
+        Screen: screen.width + " x " + screen.height,
+        Viewport: window.innerWidth + " x " + window.innerHeight,
+        CookiesEnabled: navigator.cookieEnabled
+    }));
+
+    // Response + security headers (same-origin GET)
+    let headers = null;
+    try{
+        const res = await fetch(location.href, { cache:"no-store" });
+        headers = {};
+        res.headers.forEach((val,name) => { headers[name] = val; });
+        html += block("Technology", pre({
+            HTTPStatus: res.status + " " + res.statusText,
+            Server: headers.server || "Not disclosed",
+            PoweredBy: headers["x-powered-by"] || "Not disclosed",
+            ContentType: headers["content-type"] || "Not disclosed"
+        }));
+        html += block("Response Headers", pre(headers));
+        const sec = {};
+        ["strict-transport-security","content-security-policy","x-frame-options",
+         "x-content-type-options","referrer-policy","permissions-policy"]
+            .forEach(n => { sec[n] = headers[n] || "MISSING"; });
+        html += block("Security Headers", pre(sec));
+    }catch(e){
+        html += block("Technology", "<pre>Unable to inspect response: " + esc(e.message) + "</pre>");
+    }
+
+    // Salesforce Commerce Cloud (SFCC / Demandware) quick check
+    const sfcc = [];
+    const url = location.href, host = location.hostname;
+    if(/\/on\/demandware\.store\//i.test(url)) sfcc.push("URL /on/demandware.store/");
+    if(/demandware\.net/i.test(host)) sfcc.push("Host *.demandware.net");
+    if(/commercecloud\.salesforce\.com/i.test(host)) sfcc.push("Host *.commercecloud.salesforce.com");
+    if(document.querySelector('[src*="demandware.static"],[href*="demandware.static"]')) sfcc.push("demandware.static assets");
+    if(window.dw) sfcc.push("window.dw");
+    if(window.dwAnalytics) sfcc.push("window.dwAnalytics");
+    if(window.CQuotient) sfcc.push("window.CQuotient (Einstein)");
+    if(window.SitePreferences) sfcc.push("window.SitePreferences (SiteGenesis)");
+    const siteMatch = url.match(/Sites-([A-Za-z0-9_\-]+?)-Site(?:\/([a-z]{2}(?:_[A-Z]{2})?))?/);
+    const sfccInfo = { Detected: sfcc.length ? "yes" : "no" };
+    if(siteMatch){ sfccInfo["Site ID"] = siteMatch[1]; if(siteMatch[2]) sfccInfo["Locale"] = siteMatch[2]; }
+    if(sfcc.length) sfccInfo["Signals"] = sfcc.join(", ");
+    html += block("Salesforce Commerce Cloud", pre(sfccInfo));
+
+    // Cookies
+    html += block("Cookies", "<pre>" + esc(safe(() => document.cookie, "") || "(none accessible)") + "</pre>");
+
+    // Forms
+    const forms = [...document.forms].map((f,i) => {
+        const fields = [...f.elements].map(el =>
+            "  " + (el.name || "?") + " (" + el.type + ")" + (el.type === "hidden" ? " = " + el.value : "")
+        ).join("\n");
+        return "Form " + (i+1) + " [" + (f.method || "GET").toUpperCase() + " " + f.action + "]\n" + fields;
+    }).join("\n\n");
+    html += block("Forms", "<pre>" + esc(forms || "(none)") + "</pre>");
+
+    // Resources
+    html += block("JavaScript Files", pre([...document.scripts].map(s => s.src).filter(Boolean)));
+    html += block("CSS Files", pre([...document.querySelectorAll('link[rel="stylesheet"]')].map(l => l.href).filter(Boolean)));
+
+    // URLs found in markup
+    const urls = [...new Set(document.documentElement.innerHTML.match(/\bhttps?:\/\/[^\s"'<>()]+/gi) || [])].sort();
+    html += block("URLs Found", pre(urls));
+
+    // HTML comments
+    const comments = [];
+    const it = document.createNodeIterator(document.documentElement, NodeFilter.SHOW_COMMENT);
+    let n; while((n = it.nextNode())){ const t = (n.nodeValue || "").trim(); if(t) comments.push(t); }
+    html += block("HTML Comments", "<pre>" + esc(comments.join("\n---\n") || "(none)") + "</pre>");
+
+    document.getElementById("out").innerHTML = html;
+}
+
+run();
+</script>
+
+</body>
+</html>
