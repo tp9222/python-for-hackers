@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.vedit.json
+sample.mp4
+*_edited.mp4
+.pytest_cache/

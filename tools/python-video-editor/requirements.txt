@@ -1,0 +1,18 @@
+# vedit needs an ffmpeg binary, plus Pillow for the desktop GUI preview and
+# Flask for the browser editor.
+#
+#   pip install -r requirements.txt
+#
+# imageio-ffmpeg ships a self-contained ffmpeg and needs no admin rights.
+# If you would rather have ffmpeg (and ffprobe) system-wide, run
+#   winget install Gyan.FFmpeg
+# and you can drop the imageio-ffmpeg line below.
+
+pillow>=10.0
+imageio-ffmpeg>=0.4.9
+
+# only needed for the web editor (python serve.py)
+flask>=3.0
+
+# tests only
+# pytest>=7.0
