@@ -1,10 +1,13 @@
 from flask import Flask, request, render_template_string, send_from_directory, send_file, jsonify
-import os, zipfile, io, datetime, json, uuid, threading, webbrowser
+import os, sys, zipfile, io, datetime, json, uuid, threading, webbrowser, socket
+import argparse, ipaddress, http.client
+from concurrent.futures import ThreadPoolExecutor
 from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.secret_key = "x7k2p9q"
 
+PORT           = 5000
 UPLOAD_FOLDER  = 'uploads'
 COMMANDS_FILE  = 'commands.json'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -18,6 +21,122 @@ def safe_path(relpath):
     if not resolved.startswith(BASE_DIR):
         return None
     return resolved
+
+
+def get_lan_ips():
+    """IPv4 addresses other devices on the network can use to reach this server.
+
+    The UDP 'connect' trick finds the address of the interface that would be
+    used for outbound traffic (no packet is actually sent). getaddrinfo on the
+    hostname adds any other adapters. Loopback/link-local addresses are dropped.
+    """
+    ips = []
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        ips.append(s.getsockname()[0])
+        s.close()
+    except OSError:
+        pass
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ips.append(info[4][0])
+    except OSError:
+        pass
+    seen = []
+    for ip in ips:
+        if ip.startswith(('127.', '169.254.', '0.')) or ip in seen:
+            continue
+        seen.append(ip)
+
+    def is_cgnat(ip):  # 100.64.0.0/10 - Tailscale & carrier NAT, not reachable from the local Wi-Fi
+        a, b = (int(x) for x in ip.split('.')[:2])
+        return a == 100 and 64 <= b <= 127
+    return sorted(seen, key=is_cgnat)  # stable: keeps default-route order otherwise
+
+
+# ── Peer discovery: find / connect to other Dropzone servers ───────────
+# Other Dropzones (another PC, or the Android app in Server mode) answer
+# GET /server-info with {"app": "dropzone", ...}. Probing is done here, in
+# Python, because a browser can't call another origin's /server-info (CORS).
+
+_scan_lock = threading.Lock()
+
+
+def _is_lan_ip(ip):
+    """True for private, non-loopback IPv4 - the only addresses we ever probe."""
+    try:
+        a = ipaddress.IPv4Address(ip)
+    except ValueError:
+        return False
+    return a.is_private and not a.is_loopback and not a.is_link_local
+
+
+def probe_peer(host, port=None, timeout=0.5):
+    """Return peer info if a Dropzone server answers at host:port, else None."""
+    port = port or PORT
+    try:
+        socket.create_connection((host, port), timeout=timeout).close()  # cheap reject
+        conn = http.client.HTTPConnection(host, port, timeout=timeout + 1.0)
+        try:
+            conn.request('GET', '/server-info')
+            resp = conn.getresponse()
+            if resp.status != 200:
+                return None
+            info = json.loads(resp.read(65536).decode('utf-8', 'replace'))
+        finally:
+            conn.close()
+    except (OSError, ValueError, http.client.HTTPException):
+        return None
+    if not isinstance(info, dict) or info.get('app') != 'dropzone':
+        return None
+    return {'ip': host, 'port': port, 'url': f'http://{host}:{port}',
+            'host': str(info.get('host', ''))[:80]}
+
+
+def scan_network(port=None, timeout=0.5, include_self=False):
+    """Probe every host on each of this machine's private /24 subnets.
+
+    Returns (peers, subnets). This machine's own addresses are skipped unless
+    include_self is set (used by tests).
+    """
+    port = port or PORT
+    own = set(get_lan_ips())
+    prefixes = []
+    for ip in own:
+        if _is_lan_ip(ip):
+            p = ip.rsplit('.', 1)[0]
+            if p not in prefixes:
+                prefixes.append(p)
+    hosts = [f'{p}.{i}' for p in prefixes for i in range(1, 255)
+             if include_self or f'{p}.{i}' not in own]
+    with ThreadPoolExecutor(max_workers=200) as ex:
+        peers = [r for r in ex.map(lambda h: probe_peer(h, port, timeout), hosts) if r]
+    return peers, [p + '.0/24' for p in prefixes]
+
+
+def parse_target(raw):
+    """'192.168.1.5', '192.168.1.5:5000', 'http://pc.local:5000/' -> (ip, port) or raises ValueError."""
+    t = (raw or '').strip()
+    for scheme in ('http://', 'https://'):
+        if t.lower().startswith(scheme):
+            t = t[len(scheme):]
+    t = t.split('/')[0]
+    host, port = t, PORT
+    if ':' in t:
+        host, _, p = t.rpartition(':')
+        if not p.isdigit() or not 1 <= int(p) <= 65535:
+            raise ValueError('Invalid port')
+        port = int(p)
+    if not host:
+        raise ValueError('Enter a server IP')
+    try:
+        ip = socket.gethostbyname(host)
+    except OSError:
+        raise ValueError(f'Cannot resolve {host}')
+    if not _is_lan_ip(ip):
+        raise ValueError('Only local-network (private) addresses are allowed')
+    return ip, port
 
 
 def load_commands():
@@ -93,6 +212,14 @@ body::after{
 .btn-sm:hover{border-color:var(--ac2);color:var(--ac2);}
 .btn-sm.primary{border-color:var(--ac);color:var(--ac);}
 .btn-sm.primary:hover{background:var(--ac);color:#000;}
+.ip-chip{
+  display:none;align-items:center;gap:0.4rem;border:1px solid var(--ac2);color:var(--ac2);
+  padding:0.3rem 0.7rem;font-size:0.65rem;letter-spacing:0.06em;cursor:pointer;
+  border-radius:3px;white-space:nowrap;user-select:all;
+}
+.ip-chip small{color:var(--muted);letter-spacing:0.12em;text-transform:uppercase;user-select:none;}
+.ip-chip:hover{background:rgba(0,255,157,0.08);}
+@media(max-width:700px){.ip-chip small{display:none;}}
 
 /* ── Panes ── */
 .pane{display:none;flex:1;overflow:hidden;}
@@ -125,6 +252,15 @@ body::after{
 }
 .prog-track{background:var(--s2);height:3px;border-radius:2px;overflow:hidden;}
 .prog-fill{height:100%;width:0%;background:linear-gradient(90deg,var(--ac),var(--ac2));box-shadow:0 0 8px var(--ac);transition:width 0.1s;}
+#prog-list{display:flex;flex-direction:column;gap:0.55rem;margin-top:0.9rem;max-height:260px;overflow-y:auto;}
+.pf-row{background:var(--s1);border:1px solid var(--border);border-radius:3px;padding:0.45rem 0.6rem;}
+.pf-meta{display:flex;justify-content:space-between;gap:0.75rem;font-size:0.62rem;color:var(--muted);margin-bottom:0.35rem;}
+.pf-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text,#ccc);}
+.pf-stat{flex-shrink:0;letter-spacing:0.05em;}
+.pf-row.done .pf-stat{color:var(--ac2);}
+.pf-row.err{border-color:#ff4d6d;}
+.pf-row.err .pf-stat{color:#ff4d6d;}
+.pf-row.err .prog-fill{background:#ff4d6d;box-shadow:none;}
 #staging{display:none;flex-shrink:0;}
 .staging-hdr{font-size:0.65rem;letter-spacing:0.1em;color:var(--muted);text-transform:uppercase;margin-bottom:0.5rem;}
 #staged-list{display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.75rem;}
@@ -404,6 +540,26 @@ body::after{
 }
 .btn-cancel:hover{border-color:var(--muted);color:var(--text);}
 
+/* ══ NETWORK PANE ══ */
+.net-pane{flex-direction:column;}
+.net-body{flex:1;overflow-y:auto;padding:1.2rem 1.5rem;display:flex;flex-direction:column;gap:0.9rem;}
+.net-host-input{max-width:260px;flex:1;min-width:150px;}
+.net-sec{font-size:0.62rem;letter-spacing:0.18em;color:var(--muted);text-transform:uppercase;display:flex;align-items:center;gap:0.6rem;}
+.net-sec::after{content:'';flex:1;height:1px;background:var(--border);}
+.net-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:0.75rem;}
+.peer-card{
+  background:var(--s1);border:1px solid var(--border);border-radius:4px;
+  padding:0.8rem 1rem;display:flex;align-items:center;gap:0.8rem;
+  transition:border-color 0.2s;
+}
+.peer-card:hover{border-color:var(--ac);}
+.peer-card.self{border-color:var(--muted2);}
+.peer-ico{font-size:1.3rem;flex-shrink:0;}
+.peer-info{flex:1;min-width:0;}
+.peer-name{font-size:0.74rem;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.peer-url{font-size:0.65rem;color:var(--ac2);margin-top:0.2rem;word-break:break-all;user-select:all;}
+.net-empty{grid-column:1/-1;color:var(--muted2);font-size:0.7rem;letter-spacing:0.07em;padding:1.2rem 0;}
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-track{background:var(--bg);}
@@ -438,8 +594,12 @@ body::after{
     <div class="tab" data-pane="commands" onclick="switchTab('commands')">
       <span>⌨</span> Commands
     </div>
+    <div class="tab" data-pane="network" onclick="switchTab('network')">
+      <span>🌐</span> Network
+    </div>
   </div>
   <div class="topbar-right">
+    <span class="ip-chip" id="ip-chip" title="Open this address on your phone (click to copy)" onclick="copyIp()"><small>Server</small><span id="ip-text"></span></span>
     <a href="/download-all" class="btn-sm primary">⬇ Download All (.zip)</a>
   </div>
 </div>
@@ -458,6 +618,7 @@ body::after{
       <span id="prog-pct">0%</span>
     </div>
     <div class="prog-track"><div class="prog-fill" id="prog-fill"></div></div>
+    <div id="prog-list"></div>
   </div>
   <div id="staging">
     <div class="staging-hdr">Queued — <span id="q-count">0</span> file(s)</div>
@@ -553,6 +714,25 @@ body::after{
 
 </div>
 
+<!-- ══ NETWORK PANE ══ -->
+<div class="pane net-pane" id="pane-network">
+  <div class="fs-toolbar">
+    <button class="fs-nav-btn" id="scan-btn" onclick="netScan()">⟳ Scan network</button>
+    <input class="cmd-label-input net-host-input" id="net-host" type="text"
+      placeholder="Server IP, e.g. 192.168.1.23"
+      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+      onkeydown="if(event.key==='Enter')netConnectManual()">
+    <button class="btn-update" onclick="netConnectManual()">Connect ↗</button>
+    <span class="cmd-right-meta" id="net-status"></span>
+  </div>
+  <div class="net-body">
+    <div class="net-sec">This device</div>
+    <div class="net-list" id="net-self"></div>
+    <div class="net-sec">Dropzone servers on your network</div>
+    <div class="net-list" id="net-list"><div class="net-empty">Press “Scan network” to look for other Dropzone servers (another PC, or a phone in Server mode).</div></div>
+  </div>
+</div>
+
 </div><!-- /shell -->
 <div id="toast"></div>
 
@@ -565,8 +745,9 @@ function switchTab(name) {
   document.querySelectorAll('.pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + name));
   if (name === 'browse'   && !fsBrowsed)  { fsBrowsed = true; fsHome(); }
   if (name === 'commands' && !cmdLoaded)  { cmdLoaded = true; cmdLoadAll(); }
+  if (name === 'network'  && !netLoaded)  { netLoaded = true; netInit(); }
 }
-let fsBrowsed = false, cmdLoaded = false;
+let fsBrowsed = false, cmdLoaded = false, netLoaded = false, netBusy = false;
 
 // ══════════════════════════════════════════════════
 //  Upload
@@ -616,30 +797,94 @@ function renderStaging() {
 }
 function doUpload() {
   if (!staged.length) return;
-  const fd = new FormData();
-  staged.forEach(f => fd.append('files', f));
+  const files = staged;
+  staged = [];
   const wrap = document.getElementById('prog-wrap');
   const fill = document.getElementById('prog-fill');
   const pct  = document.getElementById('prog-pct');
   const txt  = document.getElementById('prog-txt');
+  const list = document.getElementById('prog-list');
   document.getElementById('staging').style.display = 'none';
+  list.innerHTML = '';
+  fill.style.width = '0%'; pct.textContent = '0%';
   wrap.style.display = 'block';
-  const xhr = new XMLHttpRequest();
-  xhr.upload.onprogress = e => {
-    if (e.lengthComputable) {
+
+  const total  = files.reduce((a, f) => a + f.size, 0) || 1;
+  const loaded = files.map(() => 0);
+  let finished = 0, failed = 0;
+
+  const rows = files.map(f => {
+    const row = document.createElement('div');
+    row.className = 'pf-row';
+    const meta = document.createElement('div');
+    meta.className = 'pf-meta';
+    const name = document.createElement('span');
+    name.className = 'pf-name';
+    name.textContent = f.name;
+    const stat = document.createElement('span');
+    stat.className = 'pf-stat';
+    stat.textContent = 'Queued';
+    meta.append(name, stat);
+    const track = document.createElement('div');
+    track.className = 'prog-track';
+    const bar = document.createElement('div');
+    bar.className = 'prog-fill';
+    track.appendChild(bar);
+    row.append(meta, track);
+    list.appendChild(row);
+    return { row, stat, bar };
+  });
+
+  const updateOverall = () => {
+    const p = Math.round(loaded.reduce((a, b) => a + b, 0) / total * 100);
+    fill.style.width = p + '%'; pct.textContent = p + '%';
+    txt.textContent = `Uploading ${finished}/${files.length} file(s) done…`;
+  };
+
+  const uploadOne = i => new Promise(resolve => {
+    const f = files[i], r = rows[i];
+    const fd = new FormData();
+    fd.append('files', f);
+    const xhr = new XMLHttpRequest();
+    r.stat.textContent = '0% · ' + fmtSize(f.size);
+    xhr.upload.onprogress = e => {
+      if (!e.lengthComputable) return;
       const p = Math.round(e.loaded / e.total * 100);
-      fill.style.width = p + '%'; pct.textContent = p + '%';
-      txt.textContent = `Uploading ${staged.length} file(s)…`;
-    }
-  };
-  xhr.onload = () => {
-    fill.style.width = '100%';
-    setTimeout(() => { wrap.style.display = 'none'; fill.style.width = '0%'; }, 700);
-    staged = []; toast('✓ Upload complete'); loadUploads();
-  };
-  xhr.onerror = () => toast('✗ Upload failed', true);
-  xhr.open('POST', '/upload');
-  xhr.send(fd);
+      r.bar.style.width = p + '%';
+      r.stat.textContent = p + '% · ' + fmtSize(f.size);
+      loaded[i] = f.size * e.loaded / e.total;
+      updateOverall();
+    };
+    const fail = msg => {
+      failed++; finished++;
+      r.row.classList.add('err');
+      r.bar.style.width = '100%';
+      r.stat.textContent = '✗ ' + msg;
+      loaded[i] = f.size; updateOverall(); resolve();
+    };
+    xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) return fail('HTTP ' + xhr.status);
+      finished++;
+      r.row.classList.add('done');
+      r.bar.style.width = '100%';
+      r.stat.textContent = '✓ Done';
+      loaded[i] = f.size; updateOverall(); resolve();
+    };
+    xhr.onerror = () => fail('Failed');
+    xhr.open('POST', '/upload');
+    xhr.send(fd);
+  });
+
+  // Upload a few files at a time so each gets its own progress stream
+  const CONCURRENCY = 3;
+  let next = 0;
+  const worker = async () => { while (next < files.length) await uploadOne(next++); };
+  Promise.all(Array.from({ length: Math.min(CONCURRENCY, files.length) }, worker)).then(() => {
+    txt.textContent = failed ? `${files.length - failed} uploaded · ${failed} failed` : `${files.length} file(s) uploaded`;
+    toast(failed ? `✗ ${failed} of ${files.length} upload(s) failed` : '✓ Upload complete', !!failed);
+    loadUploads();
+    if (!failed) setTimeout(() => { wrap.style.display = 'none'; fill.style.width = '0%'; list.innerHTML = ''; }, 2500);
+  });
 }
 function loadUploads() {
   fetch('/files').then(r => r.json()).then(renderGrid);
@@ -1158,7 +1403,122 @@ function toast(msg, err=false) {
   t._tid = setTimeout(() => t.className = '', 3200);
 }
 
+// ══════════════════════════════════════════════════
+//  Network — scan for other Dropzone servers & connect
+//  Peer data comes from other machines, so it is only
+//  ever written to the DOM with textContent.
+// ══════════════════════════════════════════════════
+function netStatus(msg, err=false) {
+  const s = document.getElementById('net-status');
+  s.textContent = msg;
+  s.style.color = err ? 'var(--danger)' : '';
+}
+function peerCard(icon, name, url, self) {
+  const card = document.createElement('div');
+  card.className = 'peer-card' + (self ? ' self' : '');
+  const ic = document.createElement('div'); ic.className = 'peer-ico'; ic.textContent = icon;
+  const info = document.createElement('div'); info.className = 'peer-info';
+  const n = document.createElement('div'); n.className = 'peer-name'; n.textContent = name || '(unnamed)';
+  const u = document.createElement('div'); u.className = 'peer-url'; u.textContent = url;
+  info.append(n, u);
+  card.append(ic, info);
+  if (!self) {
+    const b = document.createElement('button');
+    b.className = 'btn-update';
+    b.textContent = 'Connect ↗';
+    b.onclick = () => netOpen(url);
+    card.appendChild(b);
+  }
+  return card;
+}
+function netOpen(url) {
+  try { localStorage.setItem('dz_last_peer', url.replace('http://', '')); } catch (e) {}
+  window.open(url, '_blank', 'noopener');
+}
+function netInit() {
+  try {
+    const last = localStorage.getItem('dz_last_peer');
+    if (last) document.getElementById('net-host').value = last;
+  } catch (e) {}
+  fetch('/server-info').then(r => r.json()).then(info => {
+    const box = document.getElementById('net-self');
+    box.innerHTML = '';
+    (info.urls || []).forEach((u, i) => box.appendChild(peerCard(i ? '🖧' : '🖥', i ? '' : info.host, u, true)));
+  }).catch(() => {});
+  netScan();
+}
+function netScan() {
+  if (netBusy) return;
+  netBusy = true;
+  const btn = document.getElementById('scan-btn'), list = document.getElementById('net-list');
+  btn.disabled = true;
+  netStatus('Scanning your local network…');
+  list.innerHTML = '<div class="net-empty">Scanning…</div>';
+  fetch('/scan')
+    .then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok) { list.innerHTML = ''; netStatus(d.error || 'Scan failed', true); return; }
+      list.innerHTML = '';
+      if (!d.peers.length) {
+        const e = document.createElement('div');
+        e.className = 'net-empty';
+        e.textContent = 'No other Dropzone servers found on ' + d.subnets.join(', ') + '. Start one, or type its IP above.';
+        list.appendChild(e);
+      }
+      d.peers.forEach(p => list.appendChild(peerCard('📡', p.host, p.url, false)));
+      netStatus(d.peers.length + ' found · scanned ' + d.subnets.join(', '));
+    })
+    .catch(() => { list.innerHTML = ''; netStatus('Scan failed', true); })
+    .finally(() => { netBusy = false; btn.disabled = false; });
+}
+function netConnectManual() {
+  const raw = document.getElementById('net-host').value.trim();
+  if (!raw) { toast('⚠ Enter a server IP first', true); return; }
+  // Open the tab now (inside the click) so popup blockers allow it; point it at the server once verified.
+  const w = window.open('about:blank', '_blank');
+  netStatus('Checking ' + raw + '…');
+  fetch('/probe?target=' + encodeURIComponent(raw))
+    .then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      if (!ok) throw new Error(d.error || 'Not reachable');
+      try { localStorage.setItem('dz_last_peer', d.ip + ':' + d.port); } catch (e) {}
+      netStatus('Connected to ' + d.url);
+      if (w) w.location.href = d.url; else window.open(d.url, '_blank', 'noopener');
+    })
+    .catch(e => { if (w) w.close(); netStatus(e.message, true); toast('✗ ' + e.message, true); });
+}
+
+// ── Server address chip ───────────────────────────
+function loadServerInfo() {
+  fetch('/server-info').then(r => r.json()).then(info => {
+    if (!info.scan) {  // e.g. the Android server: no /scan route, so don't offer the tab
+      const t = document.querySelector('.tab[data-pane="network"]');
+      if (t) t.style.display = 'none';
+    }
+    if (!info.urls || !info.urls.length) return;
+    // First entry is the default-route (real LAN) address; the rest are VM/VPN adapters.
+    document.getElementById('ip-text').textContent = info.urls[0];
+    const chip = document.getElementById('ip-chip');
+    chip.title = 'Open this address on your phone (click to copy)\nAll addresses:\n' + info.urls.join('\n');
+    chip.style.display = 'flex';
+  }).catch(() => {});
+}
+function copyIp() {
+  const txt = document.getElementById('ip-text').textContent;
+  const done = () => toast('✓ Copied ' + txt);
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(txt).then(done).catch(() => {});
+    return;
+  }
+  const tmp = document.createElement('textarea');
+  tmp.value = txt; tmp.style.position = 'fixed'; tmp.style.opacity = '0';
+  document.body.appendChild(tmp); tmp.select();
+  try { if (document.execCommand('copy')) done(); } catch (e) {}
+  document.body.removeChild(tmp);
+}
+
 loadUploads();
+loadServerInfo();
 </script>
 </body>
 </html>
@@ -1170,6 +1530,39 @@ loadUploads();
 @app.route('/')
 def index():
     return render_template_string(HTML)
+
+@app.route('/server-info')
+def server_info():
+    ips = get_lan_ips()
+    return jsonify({
+        'app':  'dropzone',
+        'host': socket.gethostname(),
+        'port': PORT,
+        'ips':  ips,
+        'urls': [f'http://{ip}:{PORT}' for ip in ips],
+        'scan': True,  # this server can scan for / probe peers (the UI hides the Network tab otherwise)
+    })
+
+@app.route('/scan')
+def scan():
+    if not _scan_lock.acquire(blocking=False):
+        return jsonify({'error': 'A scan is already running'}), 429
+    try:
+        peers, subnets = scan_network()
+    finally:
+        _scan_lock.release()
+    return jsonify({'peers': peers, 'subnets': subnets})
+
+@app.route('/probe')
+def probe():
+    try:
+        ip, port = parse_target(request.args.get('target', ''))
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    peer = probe_peer(ip, port, timeout=1.5)
+    if peer is None:
+        return jsonify({'error': f'No Dropzone server found at {ip}:{port}'}), 404
+    return jsonify(peer)
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -1314,12 +1707,61 @@ def cmd_delete(cmd_id):
     return jsonify({'deleted': cmd_id})
 
 def _open_browser():
-    webbrowser.open('http://127.0.0.1:5000')
+    webbrowser.open(f'http://127.0.0.1:{PORT}')
+
+def _print_addresses():
+    ips = get_lan_ips()
+    print()
+    print('  DROPZONE is running')
+    print(f'  This PC : http://127.0.0.1:{PORT}')
+    if ips:
+        for ip in ips:
+            print(f'  Network : http://{ip}:{PORT}   <- type this in the Android app / phone browser')
+    else:
+        print('  Network : no LAN address found (connect to Wi-Fi / Ethernet)')
+    print()
+
+def _cli_scan():
+    print('Scanning local network for Dropzone servers on port %d ...' % PORT)
+    peers, subnets = scan_network()
+    print('Scanned: ' + (', '.join(subnets) or 'nothing (no private network address found)'))
+    if not peers:
+        print('No other Dropzone servers found.')
+        return 1
+    for p in peers:
+        print(f"  {p['url']:<28} {p['host']}")
+    return 0
+
+def _cli_connect(target):
+    try:
+        ip, port = parse_target(target)
+    except ValueError as e:
+        print(f'error: {e}')
+        return 1
+    peer = probe_peer(ip, port, timeout=1.5)
+    if peer is None:
+        print(f'error: no Dropzone server found at {ip}:{port}')
+        return 1
+    print(f"Connected to {peer['url']}  ({peer['host']}) - opening in your browser")
+    webbrowser.open(peer['url'])
+    return 0
 
 if __name__ == '__main__':
+    ap = argparse.ArgumentParser(description='DROPZONE file drop server')
+    ap.add_argument('--scan', action='store_true',
+                    help='list other Dropzone servers on the local network and exit')
+    ap.add_argument('--connect', metavar='HOST[:PORT]',
+                    help="open another Dropzone server's page in your browser and exit")
+    args = ap.parse_args()
+    if args.scan:
+        sys.exit(_cli_scan())
+    if args.connect:
+        sys.exit(_cli_connect(args.connect))
+
     # Auto-launch the default browser when the program starts.
     # Guarded against Flask's debug reloader (which re-execs this script in a
     # child process) so we don't pop two tabs — only the real run opens one.
     if not os.environ.get('WERKZEUG_RUN_MAIN'):
+        _print_addresses()
         threading.Timer(1.0, _open_browser).start()
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=PORT, debug=True)
