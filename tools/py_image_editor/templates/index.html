@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Screenshot Editor</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="top">
+  <h1>✎ Screenshot Editor</h1>
+  <span class="sub">Crop · Highlight · Red Box · Blur</span>
+  <span class="grow"></span>
+  <span class="sub" id="count"></span>
+  <button class="btn primary" onclick="pickFiles()">＋ Add images</button>
+  <a class="btn" id="export-btn" href="/api/export">⬇ Export all (.zip)</a>
+</header>
+
+<main>
+  <div class="drop" id="drop" onclick="pickFiles()">
+    <b>Drop screenshots here</b>, click to browse, or press <b>Ctrl+V</b> to paste from the clipboard.<br>
+    PNG, JPEG or GIF. Originals are kept — every edit is saved as a separate copy you can revert.
+  </div>
+  <div class="grid" id="grid"></div>
+</main>
+
+<!-- quick viewer -->
+<div class="viewer" id="viewer" onclick="closeViewer()">
+  <img id="viewer-img" alt="">
+  <div class="vcap" id="viewer-cap"></div>
+</div>
+
+<!-- ═══════════════ IMAGE EDITOR MODAL ═══════════════ -->
+<div id="ie-overlay" class="ie-overlay">
+  <div class="ie-modal">
+    <div class="ie-head">
+      <h3>✎ Edit Screenshot <span class="ie-dims" id="ie-dims"></span></h3>
+      <button class="ie-btn" onclick="ieClose()" style="font-size:15px;">✕</button>
+    </div>
+    <div class="ie-tools">
+      <button class="ie-btn" id="ie-t-crop" onclick="ieTool('crop')" title="Crop (C)">✂ Crop</button>
+      <button class="ie-btn" id="ie-t-hl" onclick="ieTool('hl')" title="Highlight (H)">🖍 Highlight</button>
+      <button class="ie-btn" id="ie-t-box" onclick="ieTool('box')" title="Red box (R)">▢ Red Box</button>
+      <button class="ie-btn" id="ie-t-blur" onclick="ieTool('blur')" title="Blur / redact (B)">🌫 Blur</button>
+      <span class="ie-hint">Drag to apply · Ctrl+wheel to zoom · Ctrl+Z undo</span>
+      <span style="flex:1"></span>
+      <button class="ie-btn" onclick="ieUndo()">↶ Undo</button>
+      <button class="ie-btn" onclick="ieReset()">Reset</button>
+      <span class="ie-sep"></span>
+      <button class="ie-btn" onclick="ieZoomBy(1/1.25)" title="Zoom out (-)">−</button>
+      <span class="ie-zoom" id="ie-zoom-label">100%</span>
+      <button class="ie-btn" onclick="ieZoomBy(1.25)" title="Zoom in (+)">+</button>
+      <button class="ie-btn" onclick="ieFit()" title="Fit to window (0)">Fit</button>
+      <button class="ie-btn" id="ie-full-btn" onclick="ieToggleFull()" title="Full screen (F)">⛶</button>
+    </div>
+    <div class="ie-wrap"><canvas id="ie-canvas"></canvas></div>
+    <div class="ie-foot">
+      <button class="ie-btn" onclick="ieClose()">Cancel</button>
+      <button class="ie-btn primary" onclick="ieSave(this)">✓ Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+<script src="{{ url_for('static', filename='editor.js') }}"></script>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
